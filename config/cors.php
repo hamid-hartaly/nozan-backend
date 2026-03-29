@@ -1,5 +1,10 @@
 <?php
 
+$defaultFrontendOrigins = [
+    'https://nozan-service.com',
+    'https://www.nozan-service.com',
+];
+
 return [
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
@@ -9,6 +14,7 @@ return [
         env('FRONTEND_URL', 'http://localhost:3000'),
         env('FRONTEND_URL_WWW'),
         'http://127.0.0.1:3000',
+        ...$defaultFrontendOrigins,
     ])),
 
     'allowed_origins_patterns' => [],
