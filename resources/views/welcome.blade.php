@@ -6,28 +6,110 @@
 
         <title>{{ config('app.name', 'Nozan Backend') }}</title>
 
-        @vite(['resources/css/app.css', 'resources/js/app.js'])
+        <style>
+            :root {
+                color-scheme: dark;
+                font-family: Arial, Helvetica, sans-serif;
+            }
+
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                margin: 0;
+                min-height: 100vh;
+                background: #111827;
+                color: #f9fafb;
+            }
+
+            main {
+                max-width: 960px;
+                margin: 0 auto;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                gap: 24px;
+                padding: 32px 24px;
+            }
+
+            .eyebrow {
+                margin: 0;
+                color: #fbbf24;
+                text-transform: uppercase;
+                letter-spacing: 0.3em;
+                font-size: 12px;
+            }
+
+            h1 {
+                margin: 0;
+                font-size: 48px;
+                line-height: 1.1;
+            }
+
+            p {
+                margin: 0;
+                color: #d1d5db;
+                font-size: 18px;
+                line-height: 1.7;
+                max-width: 720px;
+            }
+
+            .actions {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px;
+            }
+
+            .button {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 14px 20px;
+                border-radius: 8px;
+                text-decoration: none;
+                font-size: 14px;
+                font-weight: 700;
+                transition: opacity 0.2s ease;
+            }
+
+            .button:hover {
+                opacity: 0.9;
+            }
+
+            .button-primary {
+                background: #fbbf24;
+                color: #111827;
+            }
+
+            .button-secondary {
+                border: 1px solid #374151;
+                color: #f9fafb;
+                background: transparent;
+            }
+        </style>
     </head>
-    <body class="min-h-screen bg-stone-950 text-stone-100">
-        <main class="mx-auto flex min-h-screen max-w-4xl flex-col justify-center gap-8 px-6 py-16">
-            <div class="space-y-4">
-                <p class="text-sm uppercase tracking-[0.3em] text-amber-300">Nozan Service System</p>
-                <h1 class="text-4xl font-semibold tracking-tight sm:text-5xl">Laravel backend is running.</h1>
-                <p class="max-w-2xl text-base leading-7 text-stone-300 sm:text-lg">
+    <body>
+        <main>
+            <div>
+                <p class="eyebrow">Nozan Service System</p>
+                <h1>Laravel backend is running.</h1>
+                <p>
                     This service provides the Filament admin panel and API endpoints for the Nozan platform.
                 </p>
             </div>
 
-            <div class="flex flex-col gap-3 sm:flex-row">
+            <div class="actions">
                 <a
                     href="{{ url('/admin/login') }}"
-                    class="inline-flex items-center justify-center rounded-md bg-amber-400 px-5 py-3 text-sm font-medium text-stone-950 transition hover:bg-amber-300"
+                    class="button button-primary"
                 >
                     Open Admin Panel
                 </a>
                 <a
                     href="{{ url('/api/auth/me') }}"
-                    class="inline-flex items-center justify-center rounded-md border border-stone-700 px-5 py-3 text-sm font-medium text-stone-100 transition hover:border-stone-500 hover:bg-stone-900"
+                    class="button button-secondary"
                 >
                     Test Auth Endpoint
                 </a>
