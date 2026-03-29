@@ -42,6 +42,7 @@ APP_KEY=base64:replace-me
 APP_DEBUG=false
 APP_URL=https://your-backend-domain
 FRONTEND_URL=https://your-frontend-domain
+FRONTEND_URL_WWW=https://www.your-frontend-domain
 
 LOG_CHANNEL=stack
 LOG_LEVEL=info
@@ -92,3 +93,5 @@ NEXT_PUBLIC_API_BASE_URL=https://your-backend-domain
 ```
 
 This value is read by the frontend auth client and server auth helpers.
+
+If both apex and `www` frontend domains are active, set both `FRONTEND_URL` and `FRONTEND_URL_WWW` in Laravel Cloud so CORS accepts both origins.
