@@ -8,15 +8,34 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::table('users')
+        $primaryAdmin = DB::table('users')
             ->where('role', 'admin')
             ->orderBy('id')
-            ->limit(1)
-            ->update([
-                'name'     => 'HamidHartaly',
-                'email'    => 'hamid.harrtaly@gmail.com',
-                'password' => Hash::make('H@mid1990'),
-            ]);
+            ->first(['id']);
+
+        if (! $primaryAdmin) {
+            return;
+        }
+
+        $targetEmail = 'hamid.hartaly@gmail.com';
+        $emailTakenByAnotherUser = DB::table('users')
+            ->where('email', $targetEmail)
+            ->where('id', '!=', $primaryAdmin->id)
+            ->exists();
+
+        $updates = [
+            'name'     => 'HamidHartaly',
+            'password' => Hash::make('H@mid1990'),
+        ];
+
+        // Avoid breaking deploys when the desired email already belongs to another account.
+        if (! $emailTakenByAnotherUser) {
+            $updates['email'] = $targetEmail;
+        }
+
+        DB::table('users')
+            ->where('id', $primaryAdmin->id)
+            ->update($updates);
     }
 
     public function down(): void
