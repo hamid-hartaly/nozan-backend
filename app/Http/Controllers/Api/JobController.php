@@ -55,6 +55,35 @@ class JobController extends Controller
         return response()->json($jobs->through(fn (ServiceJob $job): array => $this->transformJob($job)));
     }
 
+    public function overdueSummary(): JsonResponse
+    {
+        $threshold = Carbon::now()->subDays(7);
+
+        $jobs = ServiceJob::query()
+            ->select(['id', 'job_code', 'customer_name', 'category', 'status', 'created_at'])
+            ->whereNotIn('status', ['OUT', 'CHECKED_OUT'])
+            ->where('created_at', '<=', $threshold)
+            ->orderBy('created_at')
+            ->get();
+
+        return response()->json([
+            'count' => $jobs->count(),
+            'jobs' => $jobs->take(5)->map(function (ServiceJob $job): array {
+                $createdAt = $job->created_at ? Carbon::parse($job->created_at) : Carbon::now();
+
+                return [
+                    'id' => (string) $job->id,
+                    'job_code' => (string) $job->job_code,
+                    'customer_name' => (string) $job->customer_name,
+                    'category' => (string) $job->category,
+                    'status' => (string) $job->status,
+                    'created_at' => $createdAt->toISOString(),
+                    'overdue_days' => max(8, $createdAt->diffInDays(Carbon::now())),
+                ];
+            })->values(),
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         /** @var User $user */
