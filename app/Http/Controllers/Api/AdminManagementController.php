@@ -14,6 +14,44 @@ use Illuminate\Validation\Rule;
 
 class AdminManagementController extends Controller
 {
+    /**
+     * @return array<int, string>
+     */
+    private function manageableStaffRoles(): array
+    {
+        return [
+            UserRole::Admin->value,
+            UserRole::Accountant->value,
+            UserRole::Staff->value,
+            UserRole::Cashier->value,
+            UserRole::Technician->value,
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function supportedIntakeCategories(): array
+    {
+        return ['PANEL', 'Screen broken', 'LED', 'M.B'];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function transformStaff(User $user, ?string $generatedPassword = null): array
+    {
+        return [
+            'id' => (string) $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => $user->roleEnum()->value,
+            'can_record_payment' => $user->canRecordPaymentPermission(),
+            'is_active' => (bool) $user->is_active,
+            'generated_password' => $generatedPassword,
+        ];
+    }
+
     private function authorizeAdmin(Request $request): void
     {
         /** @var User|null $user */
@@ -27,24 +65,11 @@ class AdminManagementController extends Controller
         $this->authorizeAdmin($request);
 
         $staff = User::query()
-            ->whereIn('role', [
-                UserRole::Admin->value,
-                UserRole::Accountant->value,
-                UserRole::Staff->value,
-                UserRole::Cashier->value,
-                UserRole::Technician->value,
-            ])
+            ->whereIn('role', $this->manageableStaffRoles())
             ->orderByDesc('is_active')
             ->orderBy('name')
             ->get(['id', 'name', 'email', 'role', 'can_record_payment', 'is_active'])
-            ->map(fn (User $user): array => [
-                'id' => (string) $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->roleEnum()->value,
-                'can_record_payment' => $user->canRecordPaymentPermission(),
-                'is_active' => (bool) $user->is_active,
-            ])
+            ->map(fn (User $user): array => $this->transformStaff($user))
             ->values();
 
         return response()->json(['staff' => $staff]);
@@ -57,13 +82,7 @@ class AdminManagementController extends Controller
         $payload = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
-            'role' => ['required', Rule::in([
-                UserRole::Admin->value,
-                UserRole::Accountant->value,
-                UserRole::Staff->value,
-                UserRole::Cashier->value,
-                UserRole::Technician->value,
-            ])],
+            'role' => ['required', Rule::in($this->manageableStaffRoles())],
             'can_record_payment' => ['nullable', 'boolean'],
             'password' => ['nullable', 'string', 'min:8'],
         ]);
@@ -81,15 +100,7 @@ class AdminManagementController extends Controller
 
         return response()->json([
             'message' => 'Staff member created successfully.',
-            'staff' => [
-                'id' => (string) $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->roleEnum()->value,
-                'can_record_payment' => $user->canRecordPaymentPermission(),
-                'is_active' => true,
-                'generated_password' => isset($payload['password']) ? null : $password,
-            ],
+            'staff' => $this->transformStaff($user, isset($payload['password']) ? null : $password),
         ], 201);
     }
 
@@ -136,12 +147,7 @@ class AdminManagementController extends Controller
 
         return response()->json([
             'message' => 'Staff password reset successfully.',
-            'staff' => [
-                'id' => (string) $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'generated_password' => $password,
-            ],
+            'staff' => $this->transformStaff($user, $password),
         ]);
     }
 
@@ -173,7 +179,7 @@ class AdminManagementController extends Controller
             'intake_form.tvModelLabel' => ['nullable', 'string', 'max:120'],
             'intake_form.issueLabel' => ['nullable', 'string', 'max:160'],
             'intake_form.estimatedPriceLabel' => ['nullable', 'string', 'max:120'],
-            'intake_form.defaultCategory' => ['nullable', Rule::in(['PANEL', 'Screen broken', 'LED', 'M.B'])],
+            'intake_form.defaultCategory' => ['nullable', Rule::in($this->supportedIntakeCategories())],
             'intake_form.defaultPriority' => ['nullable', Rule::in(['normal', 'high'])],
         ]);
 
