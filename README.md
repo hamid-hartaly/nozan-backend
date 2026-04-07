@@ -26,8 +26,8 @@ php artisan serve
 
 ## Admin login
 
-- Email: `admin@nozan.local`
-- Password: `password`
+- Email: `hamid.hartaly@gmail.com`
+- Password: `H@mid1990`
 
 ## API examples
 
