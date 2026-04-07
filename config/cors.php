@@ -5,6 +5,10 @@ $defaultFrontendOrigins = [
     'https://www.nozan-service.com',
 ];
 
+$defaultFrontendOriginPatterns = [
+    '^https:\/\/[a-z0-9-]+\.vercel\.app$',
+];
+
 return [
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
@@ -14,13 +18,17 @@ return [
         env('FRONTEND_URL', 'http://localhost:3000'),
         env('FRONTEND_URL_ALT', 'http://127.0.0.1:3001'),
         env('FRONTEND_URL_WWW'),
+        'http://localhost:3000',
         'http://127.0.0.1:3000',
         'http://localhost:3001',
         'http://127.0.0.1:3001',
         ...$defaultFrontendOrigins,
     ])),
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => array_values(array_filter([
+        env('FRONTEND_URL_REGEX'),
+        ...$defaultFrontendOriginPatterns,
+    ])),
 
     'allowed_headers' => ['*'],
 
