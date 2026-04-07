@@ -311,8 +311,13 @@ class JobController extends Controller
             $job->update(['whatsapp_repair_started_sent' => true]);
         }
 
-        if ($job->status === 'FINISHED' && !$job->whatsapp_finished_sent && $whatsappService->sendJobFinishedMessage($job)) {
-            $job->update(['whatsapp_finished_sent' => true]);
+        if ($job->status === 'FINISHED' && !$job->whatsapp_finished_sent) {
+            $sent = $job->resolution === 'NOT_FIXED'
+                ? $whatsappService->sendJobNotFixedMessage($job)
+                : $whatsappService->sendJobFinishedMessage($job);
+            if ($sent) {
+                $job->update(['whatsapp_finished_sent' => true]);
+            }
         }
 
         if (in_array($job->status, ['OUT', 'CHECKED_OUT'], true) && !$job->whatsapp_pickup_sent && $whatsappService->sendReadyForPickupMessage($job)) {
@@ -486,3 +491,10 @@ class JobController extends Controller
         ];
     }
 }
+
+    public function destroy(ServiceJob $job): JsonResponse
+    {
+        $job->delete();
+
+        return response()->json(['message' => 'Job deleted successfully.']);
+    }
