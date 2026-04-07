@@ -11,6 +11,11 @@ use App\Http\Controllers\Api\JobController;
 use App\Http\Controllers\Api\PaymentController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/health', static fn () => response()->json([
+    'status' => 'ok',
+    'service' => 'nozan-backend',
+]));
+
 Route::prefix('auth')->middleware('')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
     Route::middleware('auth:sanctum')->group(function () {
