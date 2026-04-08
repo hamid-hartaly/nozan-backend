@@ -490,7 +490,6 @@ class JobController extends Controller
                 ->all(),
         ];
     }
-}
 
     public function destroy(ServiceJob $job): JsonResponse
     {
@@ -498,3 +497,4 @@ class JobController extends Controller
 
         return response()->json(['message' => 'Job deleted successfully.']);
     }
+}
