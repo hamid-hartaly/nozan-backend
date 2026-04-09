@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Enums\WhatsAppEvent;
 use App\Models\ServiceJob;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class WhatsAppService
@@ -35,8 +34,8 @@ class WhatsAppService
         }
 
         $message = sprintf(
-            "سڵاو %s،\n\nسوپاس بۆ دانانی تیڤیەکەت لە ناوەندی نوزان.\n\nژمارەی جۆب: *%s*\nمۆدێل: %s\nجۆری کێشە: %s\n\nبەم زووانەوە دەستی بە چاکردنی دەکەین.",
-            $job->customer_name ?? 'خاوەن',
+            "مرحبا %s،\n\nشكراً لاختيارك مركز نوزان لإصلاح التلفاز.\nرقم طلبك: %s\nالجهاز: %s\nالفئة: %s\n\nسنبدأ الإصلاح في أقرب وقت.",
+            $job->customer_name,
             $job->job_code,
             $job->tv_model,
             $job->category
@@ -52,7 +51,7 @@ class WhatsAppService
         }
 
         $message = sprintf(
-            "ئاگادارکردنەوە ✅\n\nخزمەتگوزاری نوزان: دەستی بە چاکردنی تیڤیەکەت کرا.\n\n🔧 جۆب: *%s*\n📺 مۆدێل: %s\n\nکاتێک تەواو بۆ ئاگادارت دەکەینەوە.",
+            "تنبيه: بدأ إصلاح جهازك\n\nرقم الطلب: %s\nالجهاز: %s\n\nسيتم إخطارك عند انتهاء الإصلاح.",
             $job->job_code,
             $job->tv_model
         );
@@ -66,16 +65,11 @@ class WhatsAppService
             return false;
         }
 
-        if ($job->resolution === 'NOT_FIXED') {
-            return $this->sendJobNotFixedMessage($job);
-        }
-
-        // FIXED
-        $price = (float) ($job->final_price_iqd ?? $job->estimated_price_iqd ?? 0);
+        $price = (float) ($job->final_price_iqd ?? $job->estimated_price_iqd);
         $message = sprintf(
-            "مژدە! تیڤیەکەت چاک کرا ✅\n\n🔧 جۆب: *%s*\n📺 مۆدێل: %s\n💰 نرخ: *%s* دینار\n\nدەتوانیت بێیت و وەری بگریت. سوپاس بۆ دانانی باوەڕتان لە خزمەتگوزاری نوزان.",
+            "أخبار سارة! انتهى إصلاح جهازك\n\nرقم الطلب: %s\nالفئة: %s\nالسعر: %s د.ع\n\nيمكنك استلام جهازك في أي وقت.",
             $job->job_code,
-            $job->tv_model,
+            $job->category,
             number_format($price)
         );
 
@@ -90,14 +84,10 @@ class WhatsAppService
 
         $unpaidAmount = max(((float) ($job->final_price_iqd ?? $job->estimated_price_iqd ?? 0)) - ((float) ($job->payment_received_iqd ?? 0)), 0);
 
-        $remainingText = $unpaidAmount > 0
-            ? sprintf("\n💵 بڕی ماوە: *%s* دینار", number_format($unpaidAmount))
-            : "\n✅ پارەی تەواو وەرگیرا";
-
         $message = sprintf(
-            "تیڤیەکەت ئامادەیە بۆ وەرگرتن 📦\n\n🔧 جۆب: *%s*%s\n\nژووری 8-5 خزمەتگوزاری نوزان. سوپاس!",
+            "جهازك جاهز للاستلام\n\nرقم الطلب: %s\nالمبلغ المتبقي: %s د.ع\n\nشكراً لتعاملك معنا!",
             $job->job_code,
-            $remainingText
+            number_format($unpaidAmount)
         );
 
         return $this->sendMessage($job->customer_phone, $message, WhatsAppEvent::JOB_READY_FOR_PICKUP->templateName());
@@ -112,7 +102,7 @@ class WhatsAppService
         $unpaidAmount = max(((float) ($job->final_price_iqd ?? $job->estimated_price_iqd ?? 0)) - ((float) ($job->payment_received_iqd ?? 0)), 0);
 
         $message = sprintf(
-            "پارەی وەرگیرا ✅\n\n🔧 جۆب: *%s*\n💰 بڕی وەرگیراو: *%s* دینار\n💵 بڕی ماوە: *%s* دینار\n\nسوپاس بۆ پێدانتان!",
+            "تم استلام دفعة\n\nرقم الطلب: %s\nالمبلغ: %s د.ع\nالمتبقي: %s د.ع\n\nشكراً!",
             $job->job_code,
             number_format((float) $amountIqd),
             number_format($unpaidAmount)
@@ -121,32 +111,10 @@ class WhatsAppService
         return $this->sendMessage($job->customer_phone, $message, WhatsAppEvent::PAYMENT_RECORDED->templateName());
     }
 
-    public function sendJobNotFixedMessage(ServiceJob $job): bool
-    {
-        if (!$this->isConfigured() || !$job->customer_phone) {
-            return false;
-        }
-
-        $reasonMap = [
-            'NOT_REPAIRABLE'      => 'چاک نابێت',
-            'MATERIAL_UNAVAILABLE' => 'پارچەی نیە',
-            'OWNER_CANCELLED'     => 'خاوەنی کانسڵی کرد',
-        ];
-        $reason = $reasonMap[$job->not_fixed_reason ?? ''] ?? 'هۆکاری نەدیاری';
-
-        $message = sprintf(
-            "ئاگادارکردنەوە — تیڤیەکەت چاک نەکرا ❌\n\n🔧 جۆب: *%s*\n📺 مۆدێل: %s\n⚠️ هۆکار: *%s*\n\nتکایە بێیت و تیڤیەکەت وەربگرەوە. سوپاس بۆ باوەڕتان.",
-            $job->job_code,
-            $job->tv_model,
-            $reason
-        );
-
-        return $this->sendMessage($job->customer_phone, $message, WhatsAppEvent::JOB_FINISHED->templateName());
-    }
-
     private function sendMessage(string $phoneNumber, string $messageBody, string $templateName): bool
     {
         try {
+            // Format phone number: ensure it starts with country code (964 for Iraq)
             $formattedPhone = $this->formatPhoneNumber($phoneNumber);
 
             if (!$this->isConfigured()) {
@@ -158,39 +126,18 @@ class WhatsAppService
                 return false;
             }
 
-            $response = Http::withToken($this->accessToken)
-                ->timeout(10)
-                ->post("https://graph.facebook.com/v19.0/{$this->phoneNumberId}/messages", [
-                    'messaging_product' => 'whatsapp',
-                    'recipient_type'    => 'individual',
-                    'to'                => $formattedPhone,
-                    'type'              => 'text',
-                    'text'              => [
-                        'preview_url' => false,
-                        'body'        => $messageBody,
-                    ],
-                ]);
-
-            if ($response->successful()) {
-                Log::info('WhatsApp message sent', [
-                    'phone'    => $formattedPhone,
-                    'template' => $templateName,
-                    'message_id' => $response->json('messages.0.id'),
-                ]);
-                return true;
-            }
-
-            Log::warning('WhatsApp API rejected message', [
-                'phone'    => $formattedPhone,
+            // For now, we'll log the message and queue it for manual delivery or webhook integration
+            // In production, integrate with actual WhatsApp Business API
+            Log::info('WhatsApp message queued', [
+                'phone' => $formattedPhone,
+                'message' => $messageBody,
                 'template' => $templateName,
-                'status'   => $response->status(),
-                'body'     => $response->json(),
             ]);
-            return false;
 
+            return true;
         } catch (\Exception $e) {
             Log::error('WhatsApp message send failed', [
-                'error'    => $e->getMessage(),
+                'error' => $e->getMessage(),
                 'template' => $templateName,
             ]);
             return false;

@@ -9,10 +9,22 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (! Schema::hasTable('inventory_items')) {
+            return;
+        }
+
         Schema::table('inventory_items', function (Blueprint $table): void {
-            $table->integer('quantity')->default(0)->after('on_hand');
-            $table->decimal('buy_price', 12, 2)->nullable()->after('unit_cost_iqd');
-            $table->decimal('sell_price', 12, 2)->nullable()->after('buy_price');
+            if (! Schema::hasColumn('inventory_items', 'quantity')) {
+                $table->integer('quantity')->default(0);
+            }
+
+            if (! Schema::hasColumn('inventory_items', 'buy_price')) {
+                $table->decimal('buy_price', 12, 2)->nullable();
+            }
+
+            if (! Schema::hasColumn('inventory_items', 'sell_price')) {
+                $table->decimal('sell_price', 12, 2)->nullable();
+            }
         });
 
         DB::table('inventory_items')->update([
@@ -24,11 +36,17 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('inventory_items', function (Blueprint $table): void {
-            $table->dropColumn([
+            $columns = [
                 'quantity',
                 'buy_price',
                 'sell_price',
-            ]);
+            ];
+
+            foreach ($columns as $column) {
+                if (Schema::hasColumn('inventory_items', $column)) {
+                    $table->dropColumn($column);
+                }
+            }
         });
     }
 };

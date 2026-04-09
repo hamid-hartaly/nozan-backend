@@ -8,25 +8,29 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (! Schema::hasTable('jobs') || ! Schema::hasColumn('jobs', 'job_code')) {
+            return;
+        }
+
         Schema::table('jobs', function (Blueprint $table) {
             if (! Schema::hasColumn('jobs', 'customer_name')) {
-                $table->string('customer_name')->nullable()->after('customer_id');
+                $table->string('customer_name')->nullable();
             }
 
             if (! Schema::hasColumn('jobs', 'customer_phone')) {
-                $table->string('customer_phone')->nullable()->after('customer_name');
+                $table->string('customer_phone')->nullable();
             }
 
             if (! Schema::hasColumn('jobs', 'repair_outcome')) {
-                $table->string('repair_outcome')->nullable()->after('status');
+                $table->string('repair_outcome')->nullable();
             }
 
             if (! Schema::hasColumn('jobs', 'repair_notes')) {
-                $table->text('repair_notes')->nullable()->after('repair_outcome');
+                $table->text('repair_notes')->nullable();
             }
 
             if (! Schema::hasColumn('jobs', 'cannot_repair_reason')) {
-                $table->string('cannot_repair_reason')->nullable()->after('repair_notes');
+                $table->string('cannot_repair_reason')->nullable();
             }
         });
     }

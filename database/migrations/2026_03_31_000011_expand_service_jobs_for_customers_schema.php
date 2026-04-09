@@ -9,15 +9,42 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (! Schema::hasTable('service_jobs')) {
+            return;
+        }
+
         Schema::table('service_jobs', function (Blueprint $table): void {
-            $table->foreignId('customer_record_id')->nullable()->after('job_code')->constrained('customers')->nullOnDelete();
-            $table->string('device_model')->nullable()->after('tv_model');
-            $table->string('device_type')->nullable()->after('device_model');
-            $table->text('problem')->nullable()->after('issue');
-            $table->text('notes')->nullable()->after('technician_notes');
-            $table->decimal('estimated_price', 12, 2)->nullable()->after('estimated_price_iqd');
-            $table->decimal('final_price', 12, 2)->nullable()->after('final_price_iqd');
-            $table->timestamp('received_at')->nullable()->after('out_at');
+            if (! Schema::hasColumn('service_jobs', 'customer_record_id')) {
+                $table->foreignId('customer_record_id')->nullable()->constrained('customers')->nullOnDelete();
+            }
+
+            if (! Schema::hasColumn('service_jobs', 'device_model')) {
+                $table->string('device_model')->nullable();
+            }
+
+            if (! Schema::hasColumn('service_jobs', 'device_type')) {
+                $table->string('device_type')->nullable();
+            }
+
+            if (! Schema::hasColumn('service_jobs', 'problem')) {
+                $table->text('problem')->nullable();
+            }
+
+            if (! Schema::hasColumn('service_jobs', 'notes')) {
+                $table->text('notes')->nullable();
+            }
+
+            if (! Schema::hasColumn('service_jobs', 'estimated_price')) {
+                $table->decimal('estimated_price', 12, 2)->nullable();
+            }
+
+            if (! Schema::hasColumn('service_jobs', 'final_price')) {
+                $table->decimal('final_price', 12, 2)->nullable();
+            }
+
+            if (! Schema::hasColumn('service_jobs', 'received_at')) {
+                $table->timestamp('received_at')->nullable();
+            }
         });
 
         DB::table('service_jobs')->update([
@@ -34,8 +61,11 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('service_jobs', function (Blueprint $table): void {
-            $table->dropConstrainedForeignId('customer_record_id');
-            $table->dropColumn([
+            if (Schema::hasColumn('service_jobs', 'customer_record_id')) {
+                $table->dropConstrainedForeignId('customer_record_id');
+            }
+
+            $columns = [
                 'device_model',
                 'device_type',
                 'problem',
@@ -43,7 +73,13 @@ return new class extends Migration
                 'estimated_price',
                 'final_price',
                 'received_at',
-            ]);
+            ];
+
+            foreach ($columns as $column) {
+                if (Schema::hasColumn('service_jobs', $column)) {
+                    $table->dropColumn($column);
+                }
+            }
         });
     }
 };
