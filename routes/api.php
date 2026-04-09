@@ -9,7 +9,17 @@ use App\Http\Controllers\Api\FinanceController;
 use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\JobController;
 use App\Http\Controllers\Api\PaymentController;
+<<<<<<< HEAD
 
+=======
+use Illuminate\Support\Facades\Route;
+
+Route::get('/health', static fn () => response()->json([
+    'status' => 'ok',
+    'service' => 'nozan-backend',
+]));
+
+>>>>>>> a847b885cfd61658f1ae44ced51f2504b2e9e9bf
 Route::prefix('auth')->middleware('')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
     Route::middleware('auth:sanctum')->group(function () {
