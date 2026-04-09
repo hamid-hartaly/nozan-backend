@@ -28,11 +28,11 @@ return new class extends Migration
             ->exists();
 
         $updates = [
-            'name'     => 'HamidHartaly',
-            'password' => Hash::make('H@mid1990'),
+            'name'       => 'HamidHartaly',
+            'password'   => Hash::make('H@mid1990'),
+            'updated_at' => now(),
         ];
 
-        // Avoid breaking deploys when the desired email already belongs to another account.
         if (! $emailTakenByAnotherUser) {
             $updates['email'] = $targetEmail;
         }
@@ -44,6 +44,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        // intentionally left blank – credentials reset is one-way
+        // intentionally blank
     }
 };

@@ -307,7 +307,7 @@ class FinanceController extends Controller
 
     public function payments(Request $request): JsonResponse
     {
-        $this->ensureFinanceAccess($request);
+        $this->ensurePaymentsAccess($request);
 
         $payments = Payment::query()
             ->with('serviceJob:id,job_code,customer_name,tv_model,status')
@@ -325,12 +325,45 @@ class FinanceController extends Controller
                 'job_code' => $payment->serviceJob?->job_code,
                 'customer_name' => $payment->serviceJob?->customer_name,
                 'job_status' => $payment->serviceJob?->status,
+                'remaining_iqd' => max(
+                    (int) round((float) ($payment->serviceJob?->final_price_iqd ?? $payment->serviceJob?->estimated_price_iqd ?? 0))
+                    - (int) round((float) ($payment->serviceJob?->payment_received_iqd ?? 0)),
+                    0,
+                ),
             ]);
+
+        if ($payments->isEmpty()) {
+            $payments = ServiceJob::query()
+                ->where(function ($query): void {
+                    $query->whereNotNull('payment_received_iqd')->where('payment_received_iqd', '>', 0);
+                })
+                ->latest('updated_at')
+                ->get()
+                ->map(fn (ServiceJob $job): array => [
+                    'id' => 'job-' . (string) $job->id,
+                    'service_job_id' => (string) $job->id,
+                    'receipt_number' => null,
+                    'amount_iqd' => (int) round((float) ($job->payment_received_iqd ?? 0)),
+                    'payment_method' => 'cash',
+                    'note' => null,
+                    'recorded_by' => $job->createdBy?->name,
+                    'recorded_at' => $job->updated_at?->toIso8601String(),
+                    'job_code' => $job->job_code,
+                    'customer_name' => $job->customer_name,
+                    'job_status' => $job->status,
+                    'remaining_iqd' => max(
+                        (int) round((float) ($job->final_price_iqd ?? $job->estimated_price_iqd ?? 0))
+                        - (int) round((float) ($job->payment_received_iqd ?? 0)),
+                        0,
+                    ),
+                ]);
+        }
 
         return response()->json([
             'payments' => $payments->all(),
             'summary' => [
                 'total_amount_iqd' => (int) $payments->sum('amount_iqd'),
+                'received_iqd' => (int) $payments->sum('amount_iqd'),
                 'payments_count' => (int) $payments->count(),
                 'cash_count' => (int) $payments->filter(fn (array $payment) => strtolower((string) $payment['payment_method']) === 'cash')->count(),
             ],
@@ -583,6 +616,16 @@ class FinanceController extends Controller
     {
         $user = $request->user();
         abort_unless($user instanceof User && in_array($user->roleEnum()->value, ['admin', 'accountant'], true), 403);
+    }
+
+    private function ensurePaymentsAccess(Request $request): void
+    {
+        $user = $request->user();
+        abort_unless(
+            $user instanceof User
+            && (in_array($user->roleEnum()->value, ['admin', 'accountant'], true) || $user->canRecordPaymentPermission()),
+            403,
+        );
     }
 
     private function amountForJob(ServiceJob $job): int

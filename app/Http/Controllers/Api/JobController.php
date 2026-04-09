@@ -13,6 +13,7 @@ use App\Services\WhatsAppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -20,6 +21,10 @@ class JobController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canAccessJobs(), 403);
+
         $query = ServiceJob::query()
             ->with(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages'])
             ->latest();
@@ -51,8 +56,16 @@ class JobController extends Controller
         }
 
         $jobs = $query->paginate($request->integer('per_page', 20));
+        $transformed = $jobs->through(fn (ServiceJob $job): array => $this->transformJob($job));
 
-        return response()->json($jobs->through(fn (ServiceJob $job): array => $this->transformJob($job)));
+        return response()->json([
+            'jobs' => $transformed->items(),
+            'data' => $transformed->items(),
+            'current_page' => $transformed->currentPage(),
+            'last_page' => $transformed->lastPage(),
+            'per_page' => $transformed->perPage(),
+            'total' => $transformed->total(),
+        ]);
     }
 
     public function overdueSummary(): JsonResponse
@@ -88,6 +101,7 @@ class JobController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canCreateJob(), 403);
 
         $payload = $request->validate([
             'customer_id' => ['sometimes', 'nullable', 'integer', Rule::exists('customers', 'id')],
@@ -133,6 +147,8 @@ class JobController extends Controller
             'estimated_price_iqd' => $payload['estimated_price_iqd'] ?? $payload['estimated_price'] ?? 0,
             'estimated_price' => $payload['estimated_price_iqd'] ?? $payload['estimated_price'] ?? 0,
             'status' => 'PENDING',
+            // Keep legacy field enabled for older clients that inspect whatsapp_sent.
+            'whatsapp_sent' => true,
             'assigned_staff_uid' => $assignedStaff?->id,
             'notes' => $payload['notes'] ?? null,
             'created_by_user_id' => $user->id,
@@ -141,7 +157,9 @@ class JobController extends Controller
         // Send WhatsApp notification for new job
         $whatsappService = new WhatsAppService();
         if ($whatsappService->sendJobCreatedMessage($job)) {
-            $job->update(['whatsapp_created_sent' => true]);
+            $job->update([
+                'whatsapp_created_sent' => true,
+            ]);
         }
 
         return response()->json([
@@ -243,6 +261,10 @@ class JobController extends Controller
 
     public function updateStatus(Request $request, ServiceJob $job): JsonResponse
     {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canOperateJobs(), 403);
+
         $payload = $request->validate([
             'status' => ['nullable', Rule::in(['PENDING', 'REPAIR', 'FINISHED', 'OUT', 'CHECKED_OUT'])],
             'final_price_iqd' => ['nullable', 'numeric', 'min:0'],
@@ -288,7 +310,9 @@ class JobController extends Controller
         if (array_key_exists('assigned_staff_uid', $payload)) {
             $assignedStaff = $payload['assigned_staff_uid'] ? User::find($payload['assigned_staff_uid']) : null;
             $job->assigned_staff_uid = $assignedStaff?->id;
-            $job->assigned_technician = $assignedStaff?->name;
+            if (Schema::hasColumn($job->getTable(), 'assigned_technician')) {
+                $job->assigned_technician = $assignedStaff?->name;
+            }
         }
 
         if ($job->status === 'REPAIR' && blank($job->repair_started_at)) {
@@ -311,13 +335,8 @@ class JobController extends Controller
             $job->update(['whatsapp_repair_started_sent' => true]);
         }
 
-        if ($job->status === 'FINISHED' && !$job->whatsapp_finished_sent) {
-            $sent = $job->resolution === 'NOT_FIXED'
-                ? $whatsappService->sendJobNotFixedMessage($job)
-                : $whatsappService->sendJobFinishedMessage($job);
-            if ($sent) {
-                $job->update(['whatsapp_finished_sent' => true]);
-            }
+        if ($job->status === 'FINISHED' && !$job->whatsapp_finished_sent && $whatsappService->sendJobFinishedMessage($job)) {
+            $job->update(['whatsapp_finished_sent' => true]);
         }
 
         if (in_array($job->status, ['OUT', 'CHECKED_OUT'], true) && !$job->whatsapp_pickup_sent && $whatsappService->sendReadyForPickupMessage($job)) {
@@ -332,6 +351,10 @@ class JobController extends Controller
 
     public function assign(Request $request, ServiceJob $job): JsonResponse
     {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canOperateJobs(), 403);
+
         $payload = $request->validate([
             'assigned_staff_uid' => ['nullable', 'integer', Rule::exists('users', 'id')],
         ]);
@@ -341,7 +364,9 @@ class JobController extends Controller
             : null;
 
         $job->assigned_staff_uid = $assignedStaff?->id;
-        $job->assigned_technician = $assignedStaff?->name;
+        if (Schema::hasColumn($job->getTable(), 'assigned_technician')) {
+            $job->assigned_technician = $assignedStaff?->name;
+        }
         $job->save();
 
         return response()->json([
@@ -352,6 +377,10 @@ class JobController extends Controller
 
     public function updateNotes(Request $request, ServiceJob $job): JsonResponse
     {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canOperateJobs(), 403);
+
         $payload = $request->validate([
             'technician_notes' => ['nullable', 'string'],
         ]);
@@ -368,6 +397,10 @@ class JobController extends Controller
 
     public function markWhatsappSent(ServiceJob $job): JsonResponse
     {
+        /** @var User|null $user */
+        $user = request()->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canOperateJobs(), 403);
+
         $job->whatsapp_sent = true;
         $job->save();
 
@@ -382,7 +415,6 @@ class JobController extends Controller
         $staff = User::query()
             ->whereIn('role', [
                 UserRole::Admin->value,
-                UserRole::Accountant->value,
                 UserRole::Staff->value,
                 UserRole::Technician->value,
             ])
@@ -489,12 +521,5 @@ class JobController extends Controller
                 ->values()
                 ->all(),
         ];
-    }
-
-    public function destroy(ServiceJob $job): JsonResponse
-    {
-        $job->delete();
-
-        return response()->json(['message' => 'Job deleted successfully.']);
     }
 }
