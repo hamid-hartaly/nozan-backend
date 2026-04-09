@@ -15,6 +15,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $image_path
  * @property string $status
  * @property Carbon|null $converted_at
+ * @property string|null $converted_job_code
  * @property string|null $notes
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
@@ -30,6 +31,7 @@ class Booking extends Model
         'image_path',
         'status',
         'converted_at',
+        'converted_job_code',
         'notes',
     ];
 

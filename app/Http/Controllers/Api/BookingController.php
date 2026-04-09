@@ -4,8 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
+use App\Models\Customer;
+use App\Models\ServiceJob;
+use App\Models\User;
+use App\Services\WhatsAppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -108,6 +113,96 @@ class BookingController extends Controller
     }
 
     /**
+     * Convert a booking into a real service job (admin only)
+     */
+    public function convertToJob(Request $request, Booking $booking): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        if ($booking->converted_job_code) {
+            $job = ServiceJob::query()->where('job_code', $booking->converted_job_code)->first();
+
+            return response()->json([
+                'message' => 'ئەو داواکارییە پێشتر کراوەتە job.',
+                'booking' => $this->transformBooking($booking),
+                'job' => $job ? $this->transformConvertedJob($job) : null,
+            ]);
+        }
+
+        $payload = $request->validate([
+            'category' => ['nullable', 'string', 'max:255'],
+            'priority' => ['nullable', 'string', 'max:50'],
+            'estimated_price_iqd' => ['nullable', 'numeric', 'min:0'],
+            'assigned_staff_uid' => ['nullable', 'integer', Rule::exists('users', 'id')],
+            'notes' => ['nullable', 'string'],
+        ]);
+
+        $job = DB::transaction(function () use ($booking, $payload, $user): ServiceJob {
+            $customer = Customer::firstOrCreate(
+                ['phone' => $booking->phone],
+                ['name' => $booking->name]
+            );
+
+            $assignedStaff = isset($payload['assigned_staff_uid'])
+                ? User::find($payload['assigned_staff_uid'])
+                : null;
+
+            $notes = array_filter([
+                $payload['notes'] ?? null,
+                $booking->notes ? 'Booking notes: ' . $booking->notes : null,
+                'Customer address: ' . $booking->address,
+            ]);
+
+            $job = ServiceJob::create([
+                'customer_id' => (string) $customer->id,
+                'customer_record_id' => $customer->id,
+                'customer_name' => $customer->name,
+                'customer_phone' => $customer->phone,
+                'tv_model' => $booking->tv_model,
+                'device_model' => $booking->tv_model,
+                'category' => strtoupper((string) ($payload['category'] ?? 'OTHER')),
+                'device_type' => strtoupper((string) ($payload['category'] ?? 'OTHER')),
+                'priority' => strtolower((string) ($payload['priority'] ?? 'normal')),
+                'issue' => $booking->description,
+                'problem' => $booking->description,
+                'estimated_price_iqd' => $payload['estimated_price_iqd'] ?? 0,
+                'estimated_price' => $payload['estimated_price_iqd'] ?? 0,
+                'status' => 'PENDING',
+                'assigned_staff_uid' => $assignedStaff?->id,
+                'notes' => implode("\n\n", $notes),
+                'created_by_user_id' => $user->id,
+            ]);
+
+            if ($booking->image_path) {
+                $job->jobImages()->create([
+                    'image_path' => $booking->image_path,
+                    'label' => 'Booking image',
+                ]);
+            }
+
+            $booking->status = 'converted';
+            $booking->converted_at = now();
+            $booking->converted_job_code = $job->job_code;
+            $booking->notes = $payload['notes'] ?? $booking->notes;
+            $booking->save();
+
+            $whatsappService = new WhatsAppService();
+            if ($whatsappService->sendJobCreatedMessage($job)) {
+                $job->update(['whatsapp_created_sent' => true]);
+            }
+
+            return $job;
+        });
+
+        return response()->json([
+            'message' => 'داواکاریەکە بووە job بە سەرکەوتوویی.',
+            'booking' => $this->transformBooking($booking->fresh()),
+            'job' => $this->transformConvertedJob($job),
+        ], 201);
+    }
+
+    /**
      * Delete a booking (admin only)
      */
     public function destroy(Booking $booking): JsonResponse
@@ -137,9 +232,22 @@ class BookingController extends Controller
             'image_url' => $booking->image_path ? asset('storage/' . ltrim($booking->image_path, '/')) : null,
             'status' => $booking->status,
             'converted_at' => $booking->converted_at?->toIso8601String(),
+            'converted_job_code' => $booking->converted_job_code,
             'notes' => $booking->notes,
             'created_at' => $booking->created_at?->toIso8601String(),
             'updated_at' => $booking->updated_at?->toIso8601String(),
+        ];
+    }
+
+    private function transformConvertedJob(ServiceJob $job): array
+    {
+        return [
+            'id' => (string) $job->id,
+            'job_code' => (string) $job->job_code,
+            'customer_name' => (string) $job->customer_name,
+            'customer_phone' => (string) $job->customer_phone,
+            'tv_model' => (string) $job->tv_model,
+            'status' => (string) $job->status,
         ];
     }
 }
