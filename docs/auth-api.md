@@ -3,6 +3,7 @@
 Base URL:
 
 - Production: `https://nozanservice-main-mzzlod.free.laravel.cloud`
+- Production: `https://nozanservice-main-mzzlod.laravel.cloud`
 - Local: `http://127.0.0.1:8000`
 
 All requests and responses use JSON.
