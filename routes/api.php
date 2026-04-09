@@ -1,17 +1,15 @@
 <?php
 
-use App\Http\Controllers\Api\AdminManagementController;
-use App\Http\Controllers\Api\AppConfigController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\BookingController;
+use App\Http\Controllers\Api\JobController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\FinanceController;
 use App\Http\Controllers\Api\InventoryController;
-use App\Http\Controllers\Api\JobController;
-use App\Http\Controllers\Api\PaymentController;
-<<<<<<< HEAD
-
-=======
+use App\Http\Controllers\Api\AppConfigController;
+use App\Http\Controllers\Api\AdminManagementController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', static fn () => response()->json([
@@ -19,7 +17,6 @@ Route::get('/health', static fn () => response()->json([
     'service' => 'nozan-backend',
 ]));
 
->>>>>>> a847b885cfd61658f1ae44ced51f2504b2e9e9bf
 Route::prefix('auth')->middleware('')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
     Route::middleware('auth:sanctum')->group(function () {
@@ -27,6 +24,9 @@ Route::prefix('auth')->middleware('')->group(function () {
         Route::post('logout', [AuthController::class, 'logout']);
     });
 });
+
+// Public booking endpoint - no authentication required
+Route::post('/bookings', [BookingController::class, 'store']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/app-config', [AppConfigController::class, 'index']);
@@ -41,6 +41,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/{job}', [JobController::class, 'show']);
         Route::put('/{job}', [JobController::class, 'update']);
+        Route::delete('/{job}', [JobController::class, 'destroy']);
         Route::patch('/{job}/status', [JobController::class, 'updateStatus']);
         Route::post('/{job}/assign', [JobController::class, 'assign']);
         Route::post('/{job}/notes', [JobController::class, 'updateNotes']);
@@ -87,5 +88,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/management/sections', [AdminManagementController::class, 'updateSections']);
         Route::put('/management/intake-form', [AdminManagementController::class, 'updateIntakeForm']);
         Route::put('/management/hidden-staff', [AdminManagementController::class, 'updateHiddenStaffIds']);
+
+        Route::prefix('bookings')->group(function () {
+            Route::get('/', [BookingController::class, 'index']);
+            Route::post('/{booking}/convert', [BookingController::class, 'convertToJob']);
+            Route::get('/{booking}', [BookingController::class, 'show']);
+            Route::put('/{booking}', [BookingController::class, 'update']);
+            Route::delete('/{booking}', [BookingController::class, 'destroy']);
+        });
     });
 });
