@@ -204,5 +204,35 @@ class ServiceJob extends Model
             default => false,
         };
     }
+
+    public function trackingToken(): string
+    {
+        $payload = sprintf('%s|%s', (string) $this->job_code, (string) $this->customer_phone);
+
+        return hash_hmac('sha256', $payload, self::trackingSecret());
+    }
+
+    public function hasValidTrackingToken(string $token): bool
+    {
+        if (trim($token) === '') {
+            return false;
+        }
+
+        return hash_equals($this->trackingToken(), $token);
+    }
+
+    private static function trackingSecret(): string
+    {
+        $appKey = (string) config('app.key', '');
+
+        if (str_starts_with($appKey, 'base64:')) {
+            $decoded = base64_decode(substr($appKey, 7), true);
+            if ($decoded !== false && $decoded !== '') {
+                return $decoded;
+            }
+        }
+
+        return $appKey !== '' ? $appKey : 'nozan-tracking-secret';
+    }
 }
 

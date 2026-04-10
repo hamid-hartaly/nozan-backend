@@ -41,4 +41,8 @@ return [
         'access_token' => env('WHATSAPP_ACCESS_TOKEN', ''),
     ],
 
+    'frontend' => [
+        'url' => env('FRONTEND_URL_WWW', env('FRONTEND_URL', 'https://www.nozan-service.com')),
+    ],
+
 ];

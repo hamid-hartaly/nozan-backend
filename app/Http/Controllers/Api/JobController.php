@@ -97,6 +97,31 @@ class JobController extends Controller
         ]);
     }
 
+    public function publicTracking(Request $request, ServiceJob $job): JsonResponse
+    {
+        $token = trim((string) $request->query('token', ''));
+
+        if (! $job->hasValidTrackingToken($token)) {
+            return response()->json([
+                'message' => 'Invalid tracking token.',
+            ], 403);
+        }
+
+        return response()->json([
+            'job' => [
+                'job_code' => (string) $job->job_code,
+                'customer_name' => (string) ($job->customer_name ?? ''),
+                'tv_model' => (string) ($job->tv_model ?? ''),
+                'category' => strtoupper((string) ($job->category ?? 'OTHER')),
+                'status' => $this->normalizeStatus((string) $job->status),
+                'created_at' => $job->created_at?->toIso8601String(),
+                'repair_started_at' => $job->repair_started_at?->toIso8601String(),
+                'finished_at' => $job->finished_at?->toIso8601String(),
+                'out_at' => $job->out_at?->toIso8601String(),
+            ],
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         /** @var User $user */

@@ -34,12 +34,20 @@ class WhatsAppService
             return false;
         }
 
+        $trackingUrl = $this->buildTrackingUrl($job);
+
         $message = sprintf(
-            "مرحبا %s،\n\nشكراً لاختيارك مركز نوزان لإصلاح التلفاز.\nرقم طلبك: %s\nالجهاز: %s\nالفئة: %s\n\nسنبدأ الإصلاح في أقرب وقت.",
+            "سڵاو %s،\n\nجۆبی تیڤیەکەت تۆمار کرا.\nژمارەی داواکاری: %s\nئامێر: %s\nپۆل: %s\n\nدەتوانیت دۆخی چاککردن لێرە ببینیت:\n%s\n\nمرحبا %s،\n\nتم تسجيل طلب إصلاح التلفاز.\nرقم الطلب: %s\nالجهاز: %s\nالفئة: %s\n\nيمكنك متابعة حالة الإصلاح عبر الرابط:\n%s",
             $job->customer_name,
             $job->job_code,
             $job->tv_model,
-            $job->category
+            $job->category,
+            $trackingUrl,
+            $job->customer_name,
+            $job->job_code,
+            $job->tv_model,
+            $job->category,
+            $trackingUrl
         );
 
         return $this->sendMessage($job->customer_phone, $message, WhatsAppEvent::JOB_CREATED->templateName());
@@ -207,5 +215,14 @@ class WhatsAppService
 
         // Otherwise, assume Iraq and prefix with +964
         return '+964' . $cleaned;
+    }
+
+    private function buildTrackingUrl(ServiceJob $job): string
+    {
+        $baseUrl = rtrim((string) config('services.frontend.url', 'https://www.nozan-service.com'), '/');
+        $jobCode = rawurlencode((string) $job->job_code);
+        $token = rawurlencode($job->trackingToken());
+
+        return sprintf('%s/track/%s?token=%s', $baseUrl, $jobCode, $token);
     }
 }
