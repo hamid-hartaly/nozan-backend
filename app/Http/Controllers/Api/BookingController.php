@@ -71,6 +71,9 @@ class BookingController extends Controller
             'status' => 'pending',
         ]);
 
+        $whatsappService = new WhatsAppService();
+        $whatsappService->sendBookingSubmittedMessage($booking->phone, $booking->name);
+
         return response()->json([
             'message' => 'شکریا، داواکاریەکە بە سەرکەوتوویی پێشکەش کرا. بۆ زیانی کپیدا لێنێ.',
             'booking' => $this->transformBooking($booking),

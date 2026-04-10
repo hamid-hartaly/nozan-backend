@@ -44,6 +44,24 @@ class WhatsAppService
         return $this->sendMessage($job->customer_phone, $message, WhatsAppEvent::JOB_CREATED->templateName());
     }
 
+    public function sendBookingSubmittedMessage(string $customerPhone, ?string $customerName = null): bool
+    {
+        if (!$this->isConfigured() || !$customerPhone) {
+            Log::info('WhatsApp: Skipping booking submitted message - not configured or no customer phone');
+            return false;
+        }
+
+        $safeName = trim((string) $customerName);
+        $greeting = $safeName !== '' ? sprintf('سڵاو %s،\n\n', $safeName) : '';
+
+        $message = $greeting .
+            "داواکاریەکەت پێشکەش کرا لە سەنتەری نۆزان. " .
+            "بە زووترین کات لەلایەن ستافی سەنتەری نۆزان پەیوەندیت پێوە دەکرێت.\n\n" .
+            "تم استلام طلبكم في مركز نوزان، وسيتم التواصل معكم في أقرب وقت من قبل فريق المركز.";
+
+        return $this->sendMessage($customerPhone, $message, 'booking_submitted');
+    }
+
     public function sendRepairStartedMessage(ServiceJob $job): bool
     {
         if (!$this->isConfigured() || !$job->customer_phone) {
