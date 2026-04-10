@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\WhatsAppEvent;
+use Illuminate\Support\Facades\Http;
 use App\Models\ServiceJob;
 use Illuminate\Support\Facades\Log;
 
@@ -134,6 +135,7 @@ class WhatsAppService
         try {
             // Format phone number: ensure it starts with country code (964 for Iraq)
             $formattedPhone = $this->formatPhoneNumber($phoneNumber);
+            $recipientPhone = ltrim($formattedPhone, '+');
 
             if (!$this->isConfigured()) {
                 Log::warning('WhatsApp not configured, would send:', [
@@ -144,12 +146,33 @@ class WhatsAppService
                 return false;
             }
 
-            // For now, we'll log the message and queue it for manual delivery or webhook integration
-            // In production, integrate with actual WhatsApp Business API
-            Log::info('WhatsApp message queued', [
+            $response = Http::withToken($this->accessToken)
+                ->acceptJson()
+                ->post(sprintf('https://graph.facebook.com/v20.0/%s/messages', $this->phoneNumberId), [
+                    'messaging_product' => 'whatsapp',
+                    'to' => $recipientPhone,
+                    'type' => 'text',
+                    'text' => [
+                        'preview_url' => false,
+                        'body' => $messageBody,
+                    ],
+                ]);
+
+            if (!$response->successful()) {
+                Log::error('WhatsApp message send failed', [
+                    'phone' => $formattedPhone,
+                    'template' => $templateName,
+                    'status' => $response->status(),
+                    'response' => $response->body(),
+                ]);
+
+                return false;
+            }
+
+            Log::info('WhatsApp message sent', [
                 'phone' => $formattedPhone,
-                'message' => $messageBody,
                 'template' => $templateName,
+                'response' => $response->json(),
             ]);
 
             return true;
