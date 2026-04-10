@@ -51,8 +51,8 @@ class BookingController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'phone' => ['required', 'string', 'max:50'],
             'tv_model' => ['required', 'string', 'max:255'],
-            'description' => ['required', 'string'],
-            'address' => ['required', 'string'],
+            'description' => ['required', 'string', 'max:5000'],
+            'address' => ['required', 'string', 'max:500'],
             'image' => ['nullable', 'image', 'max:8192'],
         ]);
 
