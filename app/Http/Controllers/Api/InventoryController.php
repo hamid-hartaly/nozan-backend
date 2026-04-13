@@ -10,10 +10,64 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class InventoryController extends Controller
 {
+    public function store(Request $request): JsonResponse
+    {
+        $this->ensureInventoryAccess($request);
+
+        $payload = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'category' => ['required', Rule::in(['COF', 'PCB', 'T.con', 'panel'])],
+            'model' => ['nullable', 'string', 'max:255'],
+            'part_number' => ['required', 'string', 'max:255'],
+            'similar_products' => ['nullable', 'array'],
+            'similar_products.*' => ['string', 'max:255'],
+            'location' => ['required', 'string', 'max:255'],
+            'unit_cost_iqd' => ['required', 'numeric', 'min:0'],
+            'photo' => ['nullable', 'image', 'max:3072'],
+        ]);
+
+        $similarProducts = collect($payload['similar_products'] ?? [])
+            ->map(static fn ($value): string => trim((string) $value))
+            ->filter(static fn (string $value): bool => $value !== '')
+            ->values()
+            ->all();
+
+        $sku = $this->generateUniqueSku((string) $payload['part_number']);
+
+        $imagePath = null;
+        if ($request->hasFile('photo')) {
+            $imagePath = $request->file('photo')?->store('inventory-items', 'public');
+        }
+
+        $item = InventoryItem::create([
+            'name' => trim((string) $payload['name']),
+            'model' => trim((string) ($payload['model'] ?? '')) ?: null,
+            'part_number' => trim((string) $payload['part_number']),
+            'similar_products' => $similarProducts,
+            'sku' => $sku,
+            'category' => (string) $payload['category'],
+            'on_hand' => 0,
+            'reserved' => 0,
+            'reorder_level' => 0,
+            'quantity' => 0,
+            'unit_cost_iqd' => $payload['unit_cost_iqd'],
+            'buy_price' => $payload['unit_cost_iqd'],
+            'location' => trim((string) $payload['location']),
+            'image_path' => $imagePath,
+            'supplier' => null,
+        ]);
+
+        return response()->json([
+            'message' => 'Inventory item created successfully.',
+            'item' => $this->transformItem($item),
+        ], 201);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -121,12 +175,32 @@ class InventoryController extends Controller
         ], 201);
     }
 
+    public function recordMovement(Request $request, InventoryItem $item): JsonResponse
+    {
+        return $this->storeMovement($request, $item);
+    }
+
     private function ensureInventoryAccess(Request $request): User
     {
         $user = $request->user();
         abort_unless($user instanceof User && $user->roleEnum()->canAccessInventory(), 403);
 
         return $user;
+    }
+
+    private function generateUniqueSku(string $partNumber): string
+    {
+        $normalized = strtoupper(preg_replace('/[^A-Za-z0-9]+/', '-', trim($partNumber)) ?: 'PART');
+        $base = trim($normalized, '-');
+        $candidate = $base;
+        $suffix = 1;
+
+        while (InventoryItem::query()->where('sku', $candidate)->exists()) {
+            $suffix++;
+            $candidate = sprintf('%s-%d', $base, $suffix);
+        }
+
+        return $candidate;
     }
 
     /**
@@ -138,13 +212,17 @@ class InventoryController extends Controller
             'id' => (string) $item->id,
             'sku' => $item->sku,
             'name' => $item->name,
+            'model' => $item->model,
+            'part_number' => $item->part_number,
+            'similar_products' => $item->similar_products ?? [],
             'category' => $item->category,
             'on_hand' => $item->on_hand,
             'reserved' => $item->reserved,
             'reorder_level' => $item->reorder_level,
             'unit_cost_iqd' => $item->unit_cost_iqd,
-            'supplier' => $item->supplier,
-            'location' => $item->location,
+            'supplier' => $item->supplier ?? '',
+            'location' => $item->location ?? '',
+            'image_url' => $item->image_path ? Storage::disk('public')->url($item->image_path) : null,
         ];
     }
 
