@@ -180,6 +180,87 @@ class InventoryController extends Controller
         return $this->storeMovement($request, $item);
     }
 
+    public function update(Request $request, InventoryItem $item): JsonResponse
+    {
+        $this->ensureInventoryAccess($request);
+
+        $payload = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'category' => ['required', Rule::in(['COF', 'PCB', 'T.con', 'panel'])],
+            'model' => ['nullable', 'string', 'max:255'],
+            'part_number' => ['required', 'string', 'max:255'],
+            'similar_products' => ['nullable', 'array'],
+            'similar_products.*' => ['string', 'max:255'],
+            'location' => ['required', 'string', 'max:255'],
+            'unit_cost_iqd' => ['required', 'numeric', 'min:0'],
+            'photo' => ['nullable', 'image', 'max:3072'],
+            'remove_photo' => ['nullable', 'boolean'],
+        ]);
+
+        $similarProducts = collect($payload['similar_products'] ?? [])
+            ->map(static fn ($value): string => trim((string) $value))
+            ->filter(static fn (string $value): bool => $value !== '')
+            ->values()
+            ->all();
+
+        $imagePath = $item->image_path;
+
+        if ($request->boolean('remove_photo') && $imagePath) {
+            Storage::disk('public')->delete($imagePath);
+            $imagePath = null;
+        }
+
+        if ($request->hasFile('photo')) {
+            if ($imagePath) {
+                Storage::disk('public')->delete($imagePath);
+            }
+
+            $imagePath = $request->file('photo')?->store('inventory-items', 'public');
+        }
+
+        $item->fill([
+            'name' => trim((string) $payload['name']),
+            'model' => trim((string) ($payload['model'] ?? '')) ?: null,
+            'part_number' => trim((string) $payload['part_number']),
+            'similar_products' => $similarProducts,
+            'category' => (string) $payload['category'],
+            'location' => trim((string) $payload['location']),
+            'unit_cost_iqd' => $payload['unit_cost_iqd'],
+            'buy_price' => $payload['unit_cost_iqd'],
+            'image_path' => $imagePath,
+        ]);
+
+        if ($item->sku === null || trim((string) $item->sku) === '') {
+            $item->sku = $this->generateUniqueSku((string) $payload['part_number']);
+        }
+
+        $item->save();
+
+        return response()->json([
+            'message' => 'Inventory item updated successfully.',
+            'item' => $this->transformItem($item->fresh()),
+        ]);
+    }
+
+    public function destroy(Request $request, InventoryItem $item): JsonResponse
+    {
+        $this->ensureInventoryAccess($request);
+
+        DB::transaction(function () use ($item): void {
+            StockMovement::query()->where('inventory_item_id', $item->id)->delete();
+
+            if ($item->image_path) {
+                Storage::disk('public')->delete($item->image_path);
+            }
+
+            $item->delete();
+        });
+
+        return response()->json([
+            'message' => 'Inventory item deleted successfully.',
+        ]);
+    }
+
     private function ensureInventoryAccess(Request $request): User
     {
         $user = $request->user();
