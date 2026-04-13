@@ -39,6 +39,9 @@ return [
         'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID', ''),
         'business_account_id' => env('WHATSAPP_BUSINESS_ACCOUNT_ID', ''),
         'access_token' => env('WHATSAPP_ACCESS_TOKEN', ''),
+        'support_number' => env('WHATSAPP_SUPPORT_NUMBER', '07704330005'),
+        'verify_ssl' => env('WHATSAPP_VERIFY_SSL', true),
+        'ca_bundle' => env('WHATSAPP_CA_BUNDLE', ''),
     ],
 
     'frontend' => [

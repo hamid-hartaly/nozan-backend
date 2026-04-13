@@ -27,6 +27,7 @@ Route::prefix('auth')->middleware('')->group(function () {
 
 // Public booking endpoint - no authentication required
 Route::post('/bookings', [BookingController::class, 'store']);
+Route::get('/public/jobs/{job}/tracking', [JobController::class, 'publicTracking']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/app-config', [AppConfigController::class, 'index']);
@@ -48,7 +49,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{job}/notes', [JobController::class, 'updateNotes']);
         Route::post('/{job}/whatsapp-sent', [JobController::class, 'markWhatsappSent']);
         Route::post('/{job}/images', [JobController::class, 'uploadImage']);
-        Route::delete('/{job}/images/{image}', [JobController::class, 'deleteImage']);
+                Route::post('/{job}/return', [JobController::class, 'createReturnJob']);
         Route::post('/{job}/payments', [PaymentController::class, 'store']);
     });
 
@@ -88,7 +89,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::put('/management/sections', [AdminManagementController::class, 'updateSections']);
         Route::put('/management/intake-form', [AdminManagementController::class, 'updateIntakeForm']);
-        Route::put('/management/hidden-staff', [AdminManagementController::class, 'updateHiddenStaffIds']);
+                Route::get('/whatsapp-status', [AdminManagementController::class, 'whatsappStatus']);
+        Route::post('/whatsapp-test', [AdminManagementController::class, 'whatsappTest']);
 
         Route::prefix('bookings')->group(function () {
             Route::get('/', [BookingController::class, 'index']);
@@ -99,3 +101,6 @@ Route::middleware('auth:sanctum')->group(function () {
         });
     });
 });
+
+
+

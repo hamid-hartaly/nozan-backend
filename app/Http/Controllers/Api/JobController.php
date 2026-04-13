@@ -26,7 +26,7 @@ class JobController extends Controller
         abort_unless($user instanceof User && $user->roleEnum()->canAccessJobs(), 403);
 
         $query = ServiceJob::query()
-            ->with(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages'])
+            ->with(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages', 'returnedFromJob:id,job_code'])
             ->latest();
 
         if ($search = $request->string('search')->toString()) {
@@ -138,6 +138,8 @@ class JobController extends Controller
             'issue' => ['required', 'string'],
             'estimated_price_iqd' => ['nullable', 'numeric', 'min:0'],
             'estimated_price' => ['nullable', 'numeric', 'min:0'],
+            'is_in_warranty' => ['sometimes', 'boolean'],
+            'warranty_company' => ['nullable', 'string', 'max:255', 'required_if:is_in_warranty,true'],
             'notes' => ['nullable', 'string'],
             'assigned_staff_uid' => ['nullable', 'integer', Rule::exists('users', 'id')],
         ]);
@@ -169,11 +171,13 @@ class JobController extends Controller
             'priority' => strtolower((string) ($payload['priority'] ?? 'normal')),
             'issue' => $payload['issue'],
             'problem' => $payload['issue'],
+            'is_in_warranty' => (bool) ($payload['is_in_warranty'] ?? false),
+            'warranty_company' => ! empty($payload['is_in_warranty']) ? ($payload['warranty_company'] ?? null) : null,
             'estimated_price_iqd' => $payload['estimated_price_iqd'] ?? $payload['estimated_price'] ?? 0,
             'estimated_price' => $payload['estimated_price_iqd'] ?? $payload['estimated_price'] ?? 0,
             'status' => 'PENDING',
-            // Keep legacy field enabled for older clients that inspect whatsapp_sent.
-            'whatsapp_sent' => true,
+            // Keep legacy field for older clients; value becomes true only after a successful send.
+            'whatsapp_sent' => false,
             'assigned_staff_uid' => $assignedStaff?->id,
             'notes' => $payload['notes'] ?? null,
             'created_by_user_id' => $user->id,
@@ -183,6 +187,7 @@ class JobController extends Controller
         $whatsappService = new WhatsAppService();
         if ($whatsappService->sendJobCreatedMessage($job)) {
             $job->update([
+                'whatsapp_sent' => true,
                 'whatsapp_created_sent' => true,
             ]);
         }
@@ -195,7 +200,7 @@ class JobController extends Controller
 
     public function show(ServiceJob $job): JsonResponse
     {
-        $job->loadMissing(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages']);
+        $job->loadMissing(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages', 'returnedFromJob:id,job_code']);
 
         return response()->json(['job' => $this->transformJob($job)]);
     }
@@ -209,6 +214,8 @@ class JobController extends Controller
             'issue' => ['sometimes', 'string'],
             'estimated_price_iqd' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'final_price_iqd' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'is_in_warranty' => ['sometimes', 'boolean'],
+            'warranty_company' => ['nullable', 'string', 'max:255', 'required_if:is_in_warranty,true'],
         ]);
 
         if (array_key_exists('tv_model', $payload)) {
@@ -238,6 +245,20 @@ class JobController extends Controller
         if (array_key_exists('final_price_iqd', $payload)) {
             $job->final_price_iqd = $payload['final_price_iqd'];
             $job->final_price = $payload['final_price_iqd'];
+        }
+
+        if (array_key_exists('is_in_warranty', $payload)) {
+            $job->is_in_warranty = (bool) $payload['is_in_warranty'];
+
+            if (! $job->is_in_warranty) {
+                $job->warranty_company = null;
+            }
+        }
+
+        if (array_key_exists('warranty_company', $payload)) {
+            $job->warranty_company = ($payload['is_in_warranty'] ?? $job->is_in_warranty)
+                ? ($payload['warranty_company'] ?? null)
+                : null;
         }
 
         $job->save();
@@ -357,15 +378,24 @@ class JobController extends Controller
         // Send WhatsApp notifications based on status change
         $whatsappService = new WhatsAppService();
         if ($job->status === 'REPAIR' && !$job->whatsapp_repair_started_sent && $whatsappService->sendRepairStartedMessage($job)) {
-            $job->update(['whatsapp_repair_started_sent' => true]);
+            $job->update([
+                'whatsapp_sent' => true,
+                'whatsapp_repair_started_sent' => true,
+            ]);
         }
 
         if ($job->status === 'FINISHED' && !$job->whatsapp_finished_sent && $whatsappService->sendJobFinishedMessage($job)) {
-            $job->update(['whatsapp_finished_sent' => true]);
+            $job->update([
+                'whatsapp_sent' => true,
+                'whatsapp_finished_sent' => true,
+            ]);
         }
 
         if (in_array($job->status, ['OUT', 'CHECKED_OUT'], true) && !$job->whatsapp_pickup_sent && $whatsappService->sendReadyForPickupMessage($job)) {
-            $job->update(['whatsapp_pickup_sent' => true]);
+            $job->update([
+                'whatsapp_sent' => true,
+                'whatsapp_pickup_sent' => true,
+            ]);
         }
 
         return response()->json([
@@ -435,6 +465,62 @@ class JobController extends Controller
         ]);
     }
 
+    public function createReturnJob(Request $request, ServiceJob $originalJob): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canCreateJob(), 403);
+
+        $payload = $request->validate([
+            'notes' => ['nullable', 'string'],
+        ]);
+
+        // Warranty mapping by category
+        $warrantyMap = [
+            'PANEL' => 2,
+            'Screen broken' => 2,
+            'LED' => 6,
+            'M.B' => 2,
+        ];
+
+        $warrantyMonths = $warrantyMap[$originalJob->category] ?? 0;
+
+        $returnJob = ServiceJob::create([
+            'customer_id' => $originalJob->customer_id,
+            'customer_record_id' => $originalJob->customer_record_id,
+            'customer_name' => $originalJob->customer_name,
+            'customer_phone' => $originalJob->customer_phone,
+            'tv_model' => $originalJob->tv_model,
+            'device_model' => $originalJob->device_model,
+            'device_type' => $originalJob->device_type,
+            'category' => $originalJob->category,
+            'priority' => $originalJob->priority ?? 'normal',
+            'issue' => "Return from: {$originalJob->job_code}",
+            'problem' => "Return from: {$originalJob->job_code}",
+            'status' => 'PENDING',
+            'is_in_warranty' => true,
+            'warranty_company' => null,
+            'warranty_months' => $warrantyMonths,
+            'returned_from_job_id' => $originalJob->id,
+            'created_by_user_id' => $user->id,
+            'notes' => $payload['notes'] ?? null,
+            'received_at' => now(),
+        ]);
+
+        $whatsappService = new WhatsAppService();
+        if ($whatsappService->sendJobCreatedMessage($returnJob)) {
+            $returnJob->update([
+                'whatsapp_sent' => true,
+                'whatsapp_created_sent' => true,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Return job created successfully.',
+            'job' => $this->transformJob($returnJob->fresh(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages', 'returnedFromJob:id,job_code'])),
+        ], 201);
+    }
+
     public function staffOptions(): JsonResponse
     {
         $staff = User::query()
@@ -491,6 +577,11 @@ class JobController extends Controller
             'category' => strtoupper((string) $job->category),
             'priority' => strtolower((string) $job->priority),
             'issue' => $job->issue,
+            'is_in_warranty' => (bool) $job->is_in_warranty,
+            'warranty_company' => $job->warranty_company,
+            'warranty_months' => (int) $job->warranty_months,
+            'returned_from_job_id' => $job->returned_from_job_id ? (string) $job->returned_from_job_id : null,
+            'returned_from_job_code' => $job->returnedFromJob?->job_code,
             'technician_notes' => $job->technician_notes,
             'status' => $this->normalizeStatus((string) $job->status),
             'estimated_price_iqd' => (float) ($job->estimated_price_iqd ?: 0),

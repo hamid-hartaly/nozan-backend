@@ -12,42 +12,99 @@ class WhatsAppService
     private string $phoneNumberId;
     private string $businessAccountId;
     private string $accessToken;
+    private string $supportNumber;
+    private bool $verifySsl;
+    private ?string $caBundle;
+
+    public function configDiagnostics(): array
+    {
+        $phoneNumberId = trim($this->phoneNumberId);
+        $accessToken = trim($this->accessToken);
+
+        $phoneIdPresent = $phoneNumberId !== '';
+        $accessTokenPresent = $accessToken !== '';
+        $phoneIdLooksLocalPhone = preg_match('/^0[0-9]{10}$/', $phoneNumberId) === 1;
+        $phoneIdLooksNumericId = preg_match('/^[0-9]{6,}$/', $phoneNumberId) === 1;
+        $tokenLooksLikePhone = preg_match('/^0[0-9]{10}$/', $accessToken) === 1;
+        $tokenLooksPlausible = strlen($accessToken) >= 20 && preg_match('/[A-Za-z]/', $accessToken) === 1;
+
+        $valid = $phoneIdPresent && $accessTokenPresent && $phoneIdLooksNumericId && !$phoneIdLooksLocalPhone && $tokenLooksPlausible && !$tokenLooksLikePhone;
+
+        $hint = null;
+
+        if (!$phoneIdPresent || !$accessTokenPresent) {
+            $hint = 'Missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN.';
+        } elseif ($phoneIdLooksLocalPhone) {
+            $hint = 'WHATSAPP_PHONE_NUMBER_ID looks like a local phone number (07...). Use Meta Phone Number ID from WhatsApp Cloud API.';
+        } elseif (!$phoneIdLooksNumericId) {
+            $hint = 'WHATSAPP_PHONE_NUMBER_ID should be a numeric Meta ID.';
+        } elseif ($tokenLooksLikePhone || !$tokenLooksPlausible) {
+            $hint = 'WHATSAPP_ACCESS_TOKEN looks invalid. Use a real Meta long-lived access token, not a phone number.';
+        }
+
+        return [
+            'valid' => $valid,
+            'phone_number_id_present' => $phoneIdPresent,
+            'access_token_present' => $accessTokenPresent,
+            'phone_number_id_looks_local_phone' => $phoneIdLooksLocalPhone,
+            'access_token_looks_like_phone' => $tokenLooksLikePhone,
+            'hint' => $hint,
+        ];
+    }
 
     public function __construct()
     {
         $this->phoneNumberId = config('services.whatsapp.phone_number_id', '');
         $this->businessAccountId = config('services.whatsapp.business_account_id', '');
         $this->accessToken = config('services.whatsapp.access_token', '');
+        $this->supportNumber = config('services.whatsapp.support_number', '07704330005');
+        $this->verifySsl = (bool) config('services.whatsapp.verify_ssl', true);
+        $caBundle = trim((string) config('services.whatsapp.ca_bundle', ''));
+        $this->caBundle = $caBundle !== '' ? $caBundle : null;
     }
 
     public function isConfigured(): bool
     {
-        return !empty($this->phoneNumberId) && !empty($this->accessToken);
+        return (bool) ($this->configDiagnostics()['valid'] ?? false);
     }
 
     public function sendJobCreatedMessage(ServiceJob $job): bool
     {
-        if (!$this->isConfigured() || !$job->customer_phone) {
-            Log::info('WhatsApp: Skipping job created message - not configured or no customer phone', [
+        if (!$this->isConfigured()) {
+            Log::warning('WhatsApp: Skipping job created message - service not configured', [
+                'job_code' => $job->job_code,
+                'phone_number_id_present' => $this->phoneNumberId !== '',
+                'access_token_present' => $this->accessToken !== '',
+            ]);
+            return false;
+        }
+
+        if (!$job->customer_phone) {
+            Log::info('WhatsApp: Skipping job created message - missing customer phone', [
                 'job_code' => $job->job_code,
             ]);
             return false;
         }
 
         $trackingUrl = $this->buildTrackingUrl($job);
+        $customerName = $this->safeCustomerName($job->customer_name);
+        $deviceName = $this->safeDeviceName($job->tv_model);
+        $category = $this->safeCategory($job->category);
 
         $message = sprintf(
-            "سڵاو %s،\n\nجۆبی تیڤیەکەت تۆمار کرا.\nژمارەی داواکاری: %s\nئامێر: %s\nپۆل: %s\n\nدەتوانیت دۆخی چاککردن لێرە ببینیت:\n%s\n\nمرحبا %s،\n\nتم تسجيل طلب إصلاح التلفاز.\nرقم الطلب: %s\nالجهاز: %s\nالفئة: %s\n\nيمكنك متابعة حالة الإصلاح عبر الرابط:\n%s",
-            $job->customer_name,
+            "سڵاو %s،\n\nئامێرەکەتان بە سەرکەوتوویی لە سەنتەری نۆزان بۆ چاککردنەوەی تەلەفزیۆن تۆمار کرا.\n\nژمارەی جۆب: %s\nئامێر: %s\nجۆر: %s\n\nتکایە ئەم ژمارەیە پارێزە بۆ هەر پەیوەندییەکی داهاتوو.\nبۆ بەدواداچوونی دۆخی چاککردن، ئەم بەستەرە بەکاربهێنە:\n%s\n\nژمارەی سەنتەر: %s\n\nسوپاس بۆ متمانەکردنتان بە سەنتەری نۆزان.\n\nمرحبا %s،\n\nتم استلام جهازكم وتسجيله بنجاح في مركز نوزان لصيانة أجهزة التلفزيون.\n\nرقم الطلب: %s\nالجهاز: %s\nالنوع: %s\n\nيرجى الاحتفاظ برقم الطلب لأي متابعة لاحقة.\nيمكنكم متابعة حالة الإصلاح عبر الرابط التالي:\n%s\n\nرقم المركز: %s\n\nشكراً لثقتكم بمركز نوزان.",
+            $customerName,
             $job->job_code,
-            $job->tv_model,
-            $job->category,
+            $deviceName,
+            $category,
             $trackingUrl,
-            $job->customer_name,
+            $this->supportNumber,
+            $customerName,
             $job->job_code,
-            $job->tv_model,
-            $job->category,
-            $trackingUrl
+            $deviceName,
+            $category,
+            $trackingUrl,
+            $this->supportNumber
         );
 
         return $this->sendMessage($job->customer_phone, $message, WhatsAppEvent::JOB_CREATED->templateName());
@@ -55,20 +112,58 @@ class WhatsAppService
 
     public function sendBookingSubmittedMessage(string $customerPhone, ?string $customerName = null): bool
     {
-        if (!$this->isConfigured() || !$customerPhone) {
-            Log::info('WhatsApp: Skipping booking submitted message - not configured or no customer phone');
+        if (!$this->isConfigured()) {
+            Log::warning('WhatsApp: Skipping booking submitted message - service not configured', [
+                'phone_number_id_present' => $this->phoneNumberId !== '',
+                'access_token_present' => $this->accessToken !== '',
+            ]);
             return false;
         }
 
-        $safeName = trim((string) $customerName);
-        $greeting = $safeName !== '' ? sprintf('سڵاو %s،\n\n', $safeName) : '';
+        if (!$customerPhone) {
+            Log::info('WhatsApp: Skipping booking submitted message - missing customer phone');
+            return false;
+        }
 
-        $message = $greeting .
-            "داواکاریەکەت پێشکەش کرا لە سەنتەری نۆزان. " .
-            "بە زووترین کات لەلایەن ستافی سەنتەری نۆزان پەیوەندیت پێوە دەکرێت.\n\n" .
-            "تم استلام طلبكم في مركز نوزان، وسيتم التواصل معكم في أقرب وقت من قبل فريق المركز.";
+        $safeName = $this->safeCustomerName($customerName);
+
+        $message = sprintf(
+            "سڵاو %s،\n\nداواکاریەکەتان بە سەرکەوتوویی لە سەنتەری نۆزان بۆ چاککردنەوەی تەلەفزیۆن تۆمار کرا.\nتیمی ئێمە بە زووترین کات پەیوەندیتان پێوە دەکات بۆ تەواوکردنی وردەکارییەکان و دیاریکردنی کات.\n\nژمارەی سەنتەر: %s\n\nسوپاس بۆ هەڵبژاردنی سەنتەری نۆزان.\n\nمرحبا %s،\n\nتم تسجيل طلبكم بنجاح في مركز نوزان لصيانة أجهزة التلفزيون.\nسيقوم فريقنا بالتواصل معكم في أقرب وقت لاستكمال التفاصيل وتحديد الموعد المناسب.\n\nرقم المركز: %s\n\nشكراً لاختياركم مركز نوزان.",
+            $safeName,
+            $this->supportNumber,
+            $safeName,
+            $this->supportNumber,
+        );
 
         return $this->sendMessage($customerPhone, $message, 'booking_submitted');
+    }
+
+    public function sendManualTestMessage(string $phoneNumber, ?string $customerName = null): bool
+    {
+        if (!$this->isConfigured()) {
+            Log::warning('WhatsApp: Skipping manual test message - service not configured', [
+                'phone_number_id_present' => $this->phoneNumberId !== '',
+                'access_token_present' => $this->accessToken !== '',
+            ]);
+            return false;
+        }
+
+        if (!trim($phoneNumber)) {
+            Log::info('WhatsApp: Skipping manual test message - missing phone number');
+            return false;
+        }
+
+        $safeName = $this->safeCustomerName($customerName);
+
+        $message = sprintf(
+            "سڵاو %s،\n\nئەمە پەیامی تاقیکردنەوەی WhatsApp ـە لە سەنتەری نۆزان بۆ چاککردنەوەی تەلەفزیۆن.\nئەگەر ئەم پەیامە پێگەیشت، واتسئەپ بە دروستی کاردەکات.\n\nژمارەی سەنتەر: %s\n\nمرحبا %s،\n\nهذه رسالة اختبار واتساب من مركز نوزان لصيانة أجهزة التلفزيون.\nإذا وصلتكم هذه الرسالة فهذا يعني أن الإرسال يعمل بشكل صحيح.\n\nرقم المركز: %s",
+            $safeName,
+            $this->supportNumber,
+            $safeName,
+            $this->supportNumber,
+        );
+
+        return $this->sendMessage($phoneNumber, $message, 'admin_manual_test');
     }
 
     public function sendRepairStartedMessage(ServiceJob $job): bool
@@ -154,9 +249,14 @@ class WhatsAppService
                 return false;
             }
 
-            $response = Http::withToken($this->accessToken)
+            $request = Http::withToken($this->accessToken)
+                ->withOptions([
+                    'verify' => $this->caBundle ?? $this->verifySsl,
+                ])
                 ->acceptJson()
-                ->post(sprintf('https://graph.facebook.com/v20.0/%s/messages', $this->phoneNumberId), [
+                ;
+
+            $response = $request->post(sprintf('https://graph.facebook.com/v20.0/%s/messages', $this->phoneNumberId), [
                     'messaging_product' => 'whatsapp',
                     'to' => $recipientPhone,
                     'type' => 'text',
@@ -224,5 +324,26 @@ class WhatsAppService
         $token = rawurlencode($job->trackingToken());
 
         return sprintf('%s/track/%s?token=%s', $baseUrl, $jobCode, $token);
+    }
+
+    private function safeCustomerName(?string $name): string
+    {
+        $safeName = trim((string) $name);
+
+        return $safeName !== '' ? $safeName : 'بەڕێز / العميل الكريم';
+    }
+
+    private function safeDeviceName(?string $deviceName): string
+    {
+        $safeName = trim((string) $deviceName);
+
+        return $safeName !== '' ? $safeName : 'TV';
+    }
+
+    private function safeCategory(?string $category): string
+    {
+        $safeCategory = trim((string) $category);
+
+        return $safeCategory !== '' ? $safeCategory : 'OTHER';
     }
 }

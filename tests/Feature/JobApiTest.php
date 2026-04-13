@@ -60,7 +60,7 @@ class JobApiTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('job.customer_name', 'Baran Karim')
             ->assertJsonPath('job.status', 'PENDING')
-            ->assertJsonPath('job.whatsapp_sent', true);
+            ->assertJsonPath('job.whatsapp_sent', false);
 
         $this->assertDatabaseCount('service_jobs', 1);
     }

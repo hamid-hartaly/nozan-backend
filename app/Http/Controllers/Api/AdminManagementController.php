@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\AppSetting;
 use App\Models\User;
+use App\Services\WhatsAppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -205,6 +206,76 @@ class AdminManagementController extends Controller
         return response()->json([
             'message' => 'Hidden staff list updated.',
             'hidden_staff_ids' => AppSetting::getValue('staff.hidden_ids', []),
+        ]);
+    }
+
+    public function whatsappStatus(Request $request): JsonResponse
+    {
+        $this->authorizeAdmin($request);
+
+        $phoneNumberId = trim((string) config('services.whatsapp.phone_number_id', ''));
+        $businessAccountId = trim((string) config('services.whatsapp.business_account_id', ''));
+        $accessToken = trim((string) config('services.whatsapp.access_token', ''));
+        $supportNumber = trim((string) config('services.whatsapp.support_number', '07704330005'));
+        $diagnostics = (new WhatsAppService())->configDiagnostics();
+
+        $missing = [];
+
+        if ($phoneNumberId === '') {
+            $missing[] = 'WHATSAPP_PHONE_NUMBER_ID';
+        }
+
+        if ($businessAccountId === '') {
+            $missing[] = 'WHATSAPP_BUSINESS_ACCOUNT_ID';
+        }
+
+        if ($accessToken === '') {
+            $missing[] = 'WHATSAPP_ACCESS_TOKEN';
+        }
+
+        return response()->json([
+            'configured' => (bool) ($diagnostics['valid'] ?? false),
+            'missing' => $missing,
+            'support_number' => $supportNumber,
+            'phone_number_id_preview' => $phoneNumberId !== '' ? substr($phoneNumberId, 0, 6) . '***' : null,
+            'business_account_id_preview' => $businessAccountId !== '' ? substr($businessAccountId, 0, 6) . '***' : null,
+            'diagnostics' => $diagnostics,
+        ]);
+    }
+
+    public function whatsappTest(Request $request): JsonResponse
+    {
+        $this->authorizeAdmin($request);
+
+        $payload = $request->validate([
+            'phone' => ['required', 'string', 'max:50'],
+            'customer_name' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        $whatsappService = new WhatsAppService();
+        $diagnostics = $whatsappService->configDiagnostics();
+
+        if (!$whatsappService->isConfigured()) {
+            return response()->json([
+                'message' => 'WhatsApp is not configured correctly.',
+                'hint' => $diagnostics['hint'] ?? null,
+                'diagnostics' => $diagnostics,
+            ], 422);
+        }
+
+        $sent = $whatsappService->sendManualTestMessage(
+            (string) $payload['phone'],
+            (string) ($payload['customer_name'] ?? 'Customer'),
+        );
+
+        if (!$sent) {
+            return response()->json([
+                'message' => 'Test message was not sent. Please check phone format and WhatsApp provider credentials.',
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'WhatsApp test message sent successfully.',
         ]);
     }
 }

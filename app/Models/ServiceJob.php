@@ -23,6 +23,10 @@ use Illuminate\Support\Carbon;
  * @property string|null $priority
  * @property string|null $issue
  * @property string|null $problem
+ * @property bool $is_in_warranty
+ * @property string|null $warranty_company
+ * @property int|null $returned_from_job_id
+ * @property int $warranty_months
  * @property string|null $technician_notes
  * @property string|float|int|null $estimated_price_iqd
  * @property string|float|int|null $estimated_price
@@ -68,6 +72,10 @@ class ServiceJob extends Model
         'priority',
         'issue',
         'problem',
+        'is_in_warranty',
+        'warranty_company',
+        'returned_from_job_id',
+        'warranty_months',
         'technician_notes',
         'estimated_price_iqd',
         'estimated_price',
@@ -105,6 +113,9 @@ class ServiceJob extends Model
             'payment_received_iqd' => 'decimal:2',
             'estimated_price' => 'decimal:2',
             'final_price' => 'decimal:2',
+            'is_in_warranty' => 'boolean',
+            'warranty_months' => 'integer',
+            'returned_from_job_id' => 'integer',
             'whatsapp_sent' => 'boolean',
             'whatsapp_created_sent' => 'boolean',
             'whatsapp_repair_started_sent' => 'boolean',
@@ -151,6 +162,16 @@ class ServiceJob extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    public function returnedFromJob(): BelongsTo
+    {
+        return $this->belongsTo(ServiceJob::class, 'returned_from_job_id');
+    }
+
+    public function returnedJobs(): HasMany
+    {
+        return $this->hasMany(ServiceJob::class, 'returned_from_job_id');
     }
 
     public function payments(): HasMany
