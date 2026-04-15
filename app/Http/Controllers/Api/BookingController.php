@@ -50,6 +50,7 @@ class BookingController extends Controller
         $payload = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'phone' => ['required', 'string', 'max:50'],
+            'device_type' => ['required', 'string', 'in:television,washing_machine,refrigerator,split_ac'],
             'tv_model' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'max:5000'],
             'address' => ['required', 'string', 'max:500'],
@@ -64,6 +65,7 @@ class BookingController extends Controller
         $booking = Booking::create([
             'name' => $payload['name'],
             'phone' => $payload['phone'],
+            'device_type' => $payload['device_type'],
             'tv_model' => $payload['tv_model'],
             'description' => $payload['description'],
             'address' => $payload['address'],
@@ -228,6 +230,7 @@ class BookingController extends Controller
             'id' => (string) $booking->id,
             'name' => $booking->name,
             'phone' => $booking->phone,
+            'device_type' => $booking->device_type,
             'tv_model' => $booking->tv_model,
             'description' => $booking->description,
             'address' => $booking->address,

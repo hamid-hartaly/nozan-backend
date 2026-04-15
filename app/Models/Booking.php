@@ -9,6 +9,7 @@ use Illuminate\Support\Carbon;
  * @property int $id
  * @property string $name
  * @property string $phone
+ * @property string $device_type
  * @property string $tv_model
  * @property string $description
  * @property string $address
@@ -25,6 +26,7 @@ class Booking extends Model
     protected $fillable = [
         'name',
         'phone',
+        'device_type',
         'tv_model',
         'description',
         'address',
