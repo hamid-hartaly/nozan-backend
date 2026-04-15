@@ -259,6 +259,7 @@ class FinanceController extends Controller
             'customer_address' => ['nullable', 'string', 'max:255'],
             'extra_items' => ['nullable', 'array'],
             'extra_items.*.description' => ['required_with:extra_items', 'string', 'max:255'],
+            'extra_items.*.model' => ['nullable', 'string', 'max:255'],
             'extra_items.*.quantity' => ['nullable', 'numeric', 'min:0.01'],
             'extra_items.*.unit_price_iqd' => ['nullable', 'numeric', 'min:0'],
             'discount_iqd' => ['nullable', 'numeric', 'min:0'],
@@ -282,9 +283,11 @@ class FinanceController extends Controller
             $extraItems = collect($payload['extra_items'] ?? [])->map(function (array $item): array {
                 $qty = (float) ($item['quantity'] ?? 1);
                 $unit = (float) ($item['unit_price_iqd'] ?? 0);
+                $model = trim((string) ($item['model'] ?? ''));
 
                 return [
                     'description' => $item['description'],
+                    'model' => $model !== '' ? $model : null,
                     'quantity' => $qty,
                     'unit_price_iqd' => $unit,
                     'line_total_iqd' => $qty * $unit,
@@ -335,7 +338,9 @@ class FinanceController extends Controller
             foreach ($extraItems as $item) {
                 $invoice->lineItems()->create([
                     'item_type' => 'extra',
-                    'description' => $item['description'],
+                    'description' => $item['model']
+                        ? sprintf('%s (Model: %s)', $item['description'], $item['model'])
+                        : $item['description'],
                     'quantity' => $item['quantity'],
                     'unit_price_iqd' => $item['unit_price_iqd'],
                     'line_total_iqd' => $item['line_total_iqd'],
