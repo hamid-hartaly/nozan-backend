@@ -289,6 +289,9 @@ class InventoryController extends Controller
      */
     private function transformItem(InventoryItem $item): array
     {
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $publicDisk */
+        $publicDisk = Storage::disk('public');
+
         return [
             'id' => (string) $item->id,
             'sku' => $item->sku,
@@ -303,7 +306,7 @@ class InventoryController extends Controller
             'unit_cost_iqd' => $item->unit_cost_iqd,
             'supplier' => $item->supplier ?? '',
             'location' => $item->location ?? '',
-            'image_url' => $item->image_path ? Storage::disk('public')->url($item->image_path) : null,
+            'image_url' => $item->image_path ? $publicDisk->url($item->image_path) : null,
         ];
     }
 

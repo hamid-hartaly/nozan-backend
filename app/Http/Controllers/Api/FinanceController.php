@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\InvoiceLineItem;
+use App\Models\InvoicePayment;
 use App\Models\MonthlyFinanceSummary;
 use App\Models\Payment;
 use App\Models\ServiceJob;
@@ -32,11 +33,19 @@ class FinanceController extends Controller
 
         $revenueToday = (int) round((float) Payment::query()
             ->whereBetween('recorded_at', [$todayStart, $todayEnd])
-            ->sum('amount_iqd'));
+            ->sum('amount_iqd'))
+            + (int) round((float) InvoicePayment::query()
+                ->whereDoesntHave('invoice.serviceJobs')
+                ->whereBetween('recorded_at', [$todayStart, $todayEnd])
+                ->sum('amount_iqd'));
 
         $revenueThisMonth = (int) round((float) Payment::query()
             ->whereBetween('recorded_at', [$monthStart, $monthEnd])
-            ->sum('amount_iqd'));
+            ->sum('amount_iqd'))
+            + (int) round((float) InvoicePayment::query()
+                ->whereDoesntHave('invoice.serviceJobs')
+                ->whereBetween('recorded_at', [$monthStart, $monthEnd])
+                ->sum('amount_iqd'));
 
         $expensesThisMonth = (int) round((float) Expense::query()
             ->whereBetween('expense_date', [$monthStart->toDateString(), $monthEnd->toDateString()])
@@ -44,7 +53,7 @@ class FinanceController extends Controller
 
         $openDebt = (int) ServiceJob::query()->get()->sum(function (ServiceJob $job): int {
             return $this->openDebtForJob($job);
-        });
+        }) + (int) round((float) Invoice::query()->doesntHave('serviceJobs')->sum('outstanding_iqd'));
 
         $pendingWithBalance = (int) ServiceJob::query()
             ->whereNotIn('status', ['OUT', 'CHECKED_OUT'])
@@ -54,7 +63,8 @@ class FinanceController extends Controller
 
         $todayPaymentsCount = Payment::query()
             ->whereBetween('recorded_at', [$todayStart, $todayEnd])
-            ->count();
+            ->count()
+            + InvoicePayment::query()->whereBetween('recorded_at', [$todayStart, $todayEnd])->count();
 
         $todayExpensesCount = Expense::query()
             ->whereDate('expense_date', $today->toDateString())
@@ -108,13 +118,26 @@ class FinanceController extends Controller
         $this->ensureFinanceAccess($request);
 
         $invoices = Invoice::query()
-            ->with(['serviceJobs:id,job_code,customer_name,tv_model,status', 'lineItems:id,invoice_id,item_type,description,quantity,unit_price_iqd,line_total_iqd'])
+            ->with([
+                'serviceJobs:id,job_code,customer_name,customer_phone,tv_model,status,assigned_staff_uid,customer_record_id,issue,technician_notes,estimated_price_iqd,final_price_iqd,payment_received_iqd',
+                'serviceJobs.assignedStaff:id,name',
+                'serviceJobs.customer:id,address',
+                'serviceJobs.stockMovements:id,inventory_item_id,service_job_id,quantity,type,reason',
+                'serviceJobs.stockMovements.inventoryItem:id,name,sku',
+                'lineItems:id,invoice_id,item_type,description,quantity,unit_price_iqd,line_total_iqd',
+                'payments:id,invoice_id,amount_iqd,method,reference,receipt_number,recorded_by,recorded_at,notes',
+            ])
             ->latest('issued_at')
             ->get();
 
         if ($invoices->isEmpty()) {
             $jobs = ServiceJob::query()
-                ->with('assignedStaff:id,name')
+                ->with([
+                    'assignedStaff:id,name',
+                    'customer:id,address',
+                    'stockMovements:id,inventory_item_id,service_job_id,quantity,type,reason',
+                    'stockMovements.inventoryItem:id,name,sku',
+                ])
                 ->latest('updated_at')
                 ->get();
 
@@ -146,15 +169,21 @@ class FinanceController extends Controller
                 'invoice_number' => $invoice->invoice_number,
                 'job_code' => $jobCodes->join(', '),
                 'job_codes' => $jobCodes->all(),
-                'customer_name' => $customers->join(', '),
+                'customer_name' => $customers->join(', ') ?: $invoice->customer_name,
+                'customer_phone' => $invoice->serviceJobs->pluck('customer_phone')->filter()->unique()->join(', ') ?: $invoice->customer_phone,
                 'tv_model' => $models->join(' | '),
                 'assigned_staff_name' => $staffNames->join(', '),
-                'job_status' => 'FINISHED',
+                'job_status' => (string) ($invoice->serviceJobs->first()?->status ?? 'FINISHED'),
                 'amount_iqd' => (int) round((float) $invoice->total_iqd),
                 'paid_iqd' => (int) round((float) $invoice->paid_iqd),
                 'outstanding_iqd' => (int) round((float) $invoice->outstanding_iqd),
                 'status' => $invoice->status,
                 'issued_at' => $invoice->issued_at?->toIso8601String(),
+                'recorded_by' => $invoice->recorded_by,
+                'subtotal_iqd' => (int) round((float) $invoice->subtotal_iqd),
+                'discount_iqd' => (int) round((float) $invoice->discount_iqd),
+                'tax_iqd' => (int) round((float) $invoice->tax_iqd),
+                'customer_address' => $invoice->serviceJobs->map(fn (ServiceJob $job): ?string => $job->customer?->address)->filter()->unique()->join(', ') ?: $invoice->customer_address,
                 'line_items' => $invoice->lineItems->map(fn (InvoiceLineItem $item): array => [
                     'id' => (string) $item->id,
                     'item_type' => $item->item_type,
@@ -162,6 +191,17 @@ class FinanceController extends Controller
                     'quantity' => (float) $item->quantity,
                     'unit_price_iqd' => (int) round((float) $item->unit_price_iqd),
                     'line_total_iqd' => (int) round((float) $item->line_total_iqd),
+                ])->values()->all(),
+                'job_details' => $invoice->serviceJobs->map(fn (ServiceJob $job): array => $this->transformInvoiceJob($job))->values()->all(),
+                'payment_entries' => $invoice->payments->map(fn (InvoicePayment $payment): array => [
+                    'id' => (string) $payment->id,
+                    'amount_iqd' => (int) round((float) $payment->amount_iqd),
+                    'method' => $payment->method,
+                    'reference' => $payment->reference,
+                    'receipt_number' => $payment->receipt_number,
+                    'recorded_by' => $payment->recorded_by,
+                    'recorded_at' => $payment->recorded_at?->toIso8601String(),
+                    'notes' => $payment->notes,
                 ])->values()->all(),
             ];
         });
@@ -212,8 +252,11 @@ class FinanceController extends Controller
         $this->ensureFinanceAccess($request);
 
         $payload = $request->validate([
-            'service_job_ids' => ['required', 'array', 'min:1'],
+            'service_job_ids' => ['nullable', 'array'],
             'service_job_ids.*' => ['integer', 'exists:service_jobs,id'],
+            'customer_name' => ['nullable', 'string', 'max:255'],
+            'customer_phone' => ['nullable', 'string', 'max:255'],
+            'customer_address' => ['nullable', 'string', 'max:255'],
             'extra_items' => ['nullable', 'array'],
             'extra_items.*.description' => ['required_with:extra_items', 'string', 'max:255'],
             'extra_items.*.quantity' => ['nullable', 'numeric', 'min:0.01'],
@@ -222,10 +265,16 @@ class FinanceController extends Controller
             'tax_iqd' => ['nullable', 'numeric', 'min:0'],
         ]);
 
+        $jobIds = collect($payload['service_job_ids'] ?? [])->filter()->values();
+        $extraItemsPayload = collect($payload['extra_items'] ?? [])->filter(fn (mixed $item): bool => is_array($item));
+
+        abort_if($jobIds->isEmpty() && $extraItemsPayload->isEmpty(), 422, 'Select a job or add at least one invoice item.');
+        abort_if($jobIds->isEmpty() && blank($payload['customer_name'] ?? null), 422, 'Customer name is required when no job is selected.');
+
         $invoice = DB::transaction(function () use ($payload, $request): Invoice {
             /** @var EloquentCollection<int, ServiceJob> $jobs */
             $jobs = ServiceJob::query()
-                ->whereIn('id', $payload['service_job_ids'])
+                ->whereIn('id', $payload['service_job_ids'] ?? [])
                 ->get();
 
             $jobSubtotal = (float) $jobs->sum(fn (ServiceJob $job): int => $this->amountForJob($job));
@@ -249,7 +298,9 @@ class FinanceController extends Controller
             $total = max($subtotal - $discount + $tax, 0);
 
             $invoice = Invoice::create([
-                'customer_name' => $jobs->pluck('customer_name')->filter()->unique()->join(', '),
+                'customer_name' => $jobs->pluck('customer_name')->filter()->unique()->join(', ') ?: ($payload['customer_name'] ?? null),
+                'customer_phone' => $jobs->pluck('customer_phone')->filter()->unique()->join(', ') ?: ($payload['customer_phone'] ?? null),
+                'customer_address' => $jobs->map(fn (ServiceJob $job): ?string => $job->customer?->address)->filter()->unique()->join(', ') ?: ($payload['customer_address'] ?? null),
                 'subtotal_iqd' => $subtotal,
                 'discount_iqd' => $discount,
                 'tax_iqd' => $tax,
@@ -261,7 +312,9 @@ class FinanceController extends Controller
                 'issued_at' => Carbon::now(),
             ]);
 
-            $invoice->serviceJobs()->sync($jobs->pluck('id')->all());
+            if ($jobs->isNotEmpty()) {
+                $invoice->serviceJobs()->sync($jobs->pluck('id')->all());
+            }
 
             foreach ($jobs as $job) {
                 $jobAmount = (float) $this->amountForJob($job);
@@ -298,11 +351,102 @@ class FinanceController extends Controller
                 'id' => (string) $invoice->id,
                 'invoice_number' => $invoice->invoice_number,
                 'job_codes' => $invoice->serviceJobs->pluck('job_code')->values()->all(),
+                'customer_name' => $invoice->customer_name,
+                'customer_phone' => $invoice->customer_phone,
                 'amount_iqd' => (int) round((float) $invoice->total_iqd),
                 'status' => $invoice->status,
                 'issued_at' => $invoice->issued_at?->toIso8601String(),
             ],
         ], 201);
+    }
+
+    public function recordInvoicePayment(Request $request, string $invoiceId): JsonResponse
+    {
+        $this->ensurePaymentsAccess($request);
+
+        $invoiceModel = Invoice::query()->findOrFail((int) $invoiceId);
+
+        $payload = $request->validate([
+            'amount_iqd' => ['required', 'numeric', 'min:1'],
+            'method' => ['nullable', 'string', 'max:50'],
+            'reference' => ['nullable', 'string', 'max:255'],
+            'notes' => ['nullable', 'string'],
+        ]);
+
+        $amount = (int) round((float) $payload['amount_iqd']);
+        abort_if($amount > (int) round((float) $invoiceModel->outstanding_iqd), 422, 'Payment cannot exceed invoice outstanding balance.');
+
+        $payment = DB::transaction(function () use ($invoiceModel, $payload, $amount): InvoicePayment {
+            $invoiceModel->loadMissing('serviceJobs');
+
+            $payment = InvoicePayment::create([
+                'invoice_id' => $invoiceModel->id,
+                'amount_iqd' => $amount,
+                'method' => $payload['method'] ?? 'cash',
+                'reference' => $payload['reference'] ?? null,
+                'notes' => $payload['notes'] ?? null,
+            ]);
+
+            $remainingAmount = $amount;
+            $jobs = $invoiceModel->serviceJobs()->get();
+
+            foreach ($jobs as $job) {
+                if ($remainingAmount <= 0) {
+                    break;
+                }
+
+                $jobRemaining = max($this->amountForJob($job) - (int) round((float) ($job->payment_received_iqd ?? 0)), 0);
+
+                if ($jobRemaining <= 0) {
+                    continue;
+                }
+
+                $allocated = min($remainingAmount, $jobRemaining);
+
+                Payment::create([
+                    'service_job_id' => $job->id,
+                    'amount_iqd' => $allocated,
+                    'method' => $payload['method'] ?? 'cash',
+                    'reference' => $payload['reference'] ?? null,
+                    'notes' => $payload['notes'] ?? null,
+                ]);
+
+                $job->increment('payment_received_iqd', $allocated);
+                $remainingAmount -= $allocated;
+            }
+
+            $invoiceModel->paid_iqd = (float) $invoiceModel->paid_iqd + $amount;
+            $invoiceModel->outstanding_iqd = max((float) $invoiceModel->total_iqd - (float) $invoiceModel->paid_iqd, 0);
+            $invoiceModel->status = $invoiceModel->outstanding_iqd <= 0
+                ? 'PAID'
+                : ((float) $invoiceModel->paid_iqd > 0 ? 'PARTIAL' : 'UNPAID');
+            $invoiceModel->save();
+
+            return $payment->fresh();
+        });
+
+        $invoiceModel->refresh();
+
+        return response()->json([
+            'message' => 'Invoice payment recorded successfully.',
+            'payment' => [
+                'id' => (string) $payment->id,
+                'amount_iqd' => (int) round((float) $payment->amount_iqd),
+                'method' => $payment->method,
+                'reference' => $payment->reference,
+                'receipt_number' => $payment->receipt_number,
+                'recorded_by' => $payment->recorded_by,
+                'recorded_at' => $payment->recorded_at?->toIso8601String(),
+                'notes' => $payment->notes,
+            ],
+            'invoice' => [
+                'id' => (string) $invoiceModel->id,
+                'invoice_number' => $invoiceModel->invoice_number,
+                'paid_iqd' => (int) round((float) $invoiceModel->paid_iqd),
+                'outstanding_iqd' => (int) round((float) $invoiceModel->outstanding_iqd),
+                'status' => $invoiceModel->status,
+            ],
+        ]);
     }
 
     public function payments(Request $request): JsonResponse
@@ -359,13 +503,37 @@ class FinanceController extends Controller
                 ]);
         }
 
+        $invoicePayments = InvoicePayment::query()
+            ->whereDoesntHave('invoice.serviceJobs')
+            ->with('invoice:id,invoice_number,customer_name,customer_phone,tv_model,total_iqd,paid_iqd,outstanding_iqd,status')
+            ->latest('recorded_at')
+            ->get()
+            ->map(fn (InvoicePayment $payment): array => [
+                'id' => 'invoice-payment-' . (string) $payment->id,
+                'service_job_id' => 'invoice-' . (string) $payment->invoice_id,
+                'receipt_number' => $payment->receipt_number,
+                'amount_iqd' => (int) round((float) $payment->amount_iqd),
+                'payment_method' => $payment->method,
+                'note' => $payment->notes,
+                'recorded_by' => $payment->recorded_by,
+                'recorded_at' => $payment->recorded_at?->toIso8601String(),
+                'job_code' => $payment->invoice?->invoice_number,
+                'customer_name' => $payment->invoice?->customer_name,
+                'job_status' => 'CHECKED_OUT',
+                'remaining_iqd' => (int) round((float) ($payment->invoice?->outstanding_iqd ?? 0)),
+                'tv_model' => $payment->invoice?->tv_model ?: 'Invoice payment',
+                'status' => (float) ($payment->invoice?->outstanding_iqd ?? 0) <= 0 ? 'CLEARED' : 'PARTIAL',
+            ]);
+
+        $allPayments = $payments->concat($invoicePayments)->sortByDesc(fn (array $payment) => $payment['recorded_at'] ?? '')->values();
+
         return response()->json([
-            'payments' => $payments->all(),
+            'payments' => $allPayments->all(),
             'summary' => [
-                'total_amount_iqd' => (int) $payments->sum('amount_iqd'),
-                'received_iqd' => (int) $payments->sum('amount_iqd'),
-                'payments_count' => (int) $payments->count(),
-                'cash_count' => (int) $payments->filter(fn (array $payment) => strtolower((string) $payment['payment_method']) === 'cash')->count(),
+                'total_amount_iqd' => (int) $allPayments->sum('amount_iqd'),
+                'received_iqd' => (int) $allPayments->sum('amount_iqd'),
+                'payments_count' => (int) $allPayments->count(),
+                'cash_count' => (int) $allPayments->filter(fn (array $payment) => strtolower((string) $payment['payment_method']) === 'cash')->count(),
             ],
         ]);
     }
@@ -492,23 +660,43 @@ class FinanceController extends Controller
             ->orderByDesc('recorded_at')
             ->get();
 
-        return response()->json([
-            'date' => $targetDate->toDateString(),
-            'summary' => [
-                'total_received_iqd' => (int) round((float) $payments->sum('amount_iqd')),
-                'payments_count' => $payments->count(),
-                'jobs_count' => $payments->pluck('service_job_id')->unique()->count(),
-            ],
-            'payments' => $payments->map(fn (Payment $payment): array => [
-                'id' => (string) $payment->id,
+        $invoicePayments = InvoicePayment::query()
+            ->whereDoesntHave('invoice.serviceJobs')
+            ->with('invoice:id,invoice_number,customer_name')
+            ->whereBetween('recorded_at', [$start, $end])
+            ->orderByDesc('recorded_at')
+            ->get();
+
+        $combinedPayments = $payments->map(fn (Payment $payment): array => [
+            'id' => (string) $payment->id,
+            'receipt_number' => $payment->receipt_number,
+            'job_code' => $payment->serviceJob?->job_code,
+            'customer_name' => $payment->serviceJob?->customer_name,
+            'amount_iqd' => (int) round((float) $payment->amount_iqd),
+            'method' => $payment->method,
+            'recorded_by' => $payment->recorded_by,
+            'recorded_at' => $payment->recorded_at?->toIso8601String(),
+        ])->concat(
+            $invoicePayments->map(fn (InvoicePayment $payment): array => [
+                'id' => 'invoice-payment-' . (string) $payment->id,
                 'receipt_number' => $payment->receipt_number,
-                'job_code' => $payment->serviceJob?->job_code,
-                'customer_name' => $payment->serviceJob?->customer_name,
+                'job_code' => $payment->invoice?->invoice_number,
+                'customer_name' => $payment->invoice?->customer_name,
                 'amount_iqd' => (int) round((float) $payment->amount_iqd),
                 'method' => $payment->method,
                 'recorded_by' => $payment->recorded_by,
                 'recorded_at' => $payment->recorded_at?->toIso8601String(),
-            ])->values()->all(),
+            ])
+        )->sortByDesc(fn (array $payment) => $payment['recorded_at'] ?? '')->values();
+
+        return response()->json([
+            'date' => $targetDate->toDateString(),
+            'summary' => [
+                'total_received_iqd' => (int) round((float) $combinedPayments->sum('amount_iqd')),
+                'payments_count' => $combinedPayments->count(),
+                'jobs_count' => $combinedPayments->pluck('job_code')->filter()->unique()->count(),
+            ],
+            'payments' => $combinedPayments->all(),
         ]);
     }
 
@@ -530,6 +718,13 @@ class FinanceController extends Controller
             ->orderBy('recorded_at')
             ->get();
 
+        $invoicePayments = InvoicePayment::query()
+            ->whereDoesntHave('invoice.serviceJobs')
+            ->with('invoice:id,invoice_number,customer_name')
+            ->whereBetween('recorded_at', [$start, $end])
+            ->orderBy('recorded_at')
+            ->get();
+
         $rows = collect([
             ['Date', 'Receipt', 'Job Code', 'Customer', 'TV Model', 'Amount IQD', 'Method', 'Recorded By', 'Reference'],
         ])->concat(
@@ -539,6 +734,18 @@ class FinanceController extends Controller
                 (string) ($payment->serviceJob?->job_code ?? ''),
                 (string) ($payment->serviceJob?->customer_name ?? ''),
                 (string) ($payment->serviceJob?->tv_model ?? ''),
+                (string) ((int) round((float) $payment->amount_iqd)),
+                (string) $payment->method,
+                (string) ($payment->recorded_by ?? ''),
+                (string) ($payment->reference ?? ''),
+            ])
+        )->concat(
+            $invoicePayments->map(fn (InvoicePayment $payment): array => [
+                (string) ($payment->recorded_at?->toDateString() ?? ''),
+                (string) ($payment->receipt_number ?? ''),
+                (string) ($payment->invoice?->invoice_number ?? ''),
+                (string) ($payment->invoice?->customer_name ?? ''),
+                'Invoice payment',
                 (string) ((int) round((float) $payment->amount_iqd)),
                 (string) $payment->method,
                 (string) ($payment->recorded_by ?? ''),
@@ -651,7 +858,11 @@ class FinanceController extends Controller
 
         $revenue = (int) round((float) Payment::query()
             ->whereBetween('recorded_at', [$start, $end])
-            ->sum('amount_iqd'));
+            ->sum('amount_iqd'))
+            + (int) round((float) InvoicePayment::query()
+                ->whereDoesntHave('invoice.serviceJobs')
+                ->whereBetween('recorded_at', [$start, $end])
+                ->sum('amount_iqd'));
 
         $expenses = (int) round((float) Expense::query()
             ->whereBetween('expense_date', [$start->toDateString(), $end->toDateString()])
@@ -661,7 +872,11 @@ class FinanceController extends Controller
             ->whereBetween('created_at', [$start, $end])
             ->get();
 
-        $openDebt = (int) $jobs->sum(fn (ServiceJob $job): int => $this->openDebtForJob($job));
+        $openDebt = (int) $jobs->sum(fn (ServiceJob $job): int => $this->openDebtForJob($job))
+            + (int) round((float) Invoice::query()
+                ->doesntHave('serviceJobs')
+                ->whereBetween('created_at', [$start, $end])
+                ->sum('outstanding_iqd'));
 
         return [
             'year' => (int) $start->year,
@@ -689,7 +904,10 @@ class FinanceController extends Controller
             'id' => 'INV-'.$job->job_code,
             'invoice_number' => 'INV-'.$job->job_code,
             'job_code' => $job->job_code,
+            'job_codes' => [$job->job_code],
             'customer_name' => $job->customer_name,
+            'customer_phone' => $job->customer_phone,
+            'customer_address' => $job->customer?->address,
             'tv_model' => $job->tv_model,
             'assigned_staff_name' => $job->assignedStaff?->name,
             'job_status' => $job->status,
@@ -698,6 +916,55 @@ class FinanceController extends Controller
             'outstanding_iqd' => $outstanding,
             'status' => $outstanding === 0 && $amount > 0 ? 'PAID' : ($paid > 0 ? 'PARTIAL' : 'UNPAID'),
             'issued_at' => $job->finished_at?->toJSON() ?? $job->created_at?->toJSON(),
+            'recorded_by' => $job->createdBy?->name,
+            'subtotal_iqd' => $amount,
+            'discount_iqd' => 0,
+            'tax_iqd' => 0,
+            'line_items' => [[
+                'id' => 'job-'.$job->id,
+                'item_type' => 'job',
+                'description' => sprintf('%s - %s', $job->job_code, $job->tv_model),
+                'quantity' => 1,
+                'unit_price_iqd' => $amount,
+                'line_total_iqd' => $amount,
+            ]],
+            'job_details' => [$this->transformInvoiceJob($job)],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function transformInvoiceJob(ServiceJob $job): array
+    {
+        $amount = $this->amountForJob($job);
+        $paid = (int) round((float) ($job->payment_received_iqd ?? 0));
+
+        return [
+            'id' => (string) $job->id,
+            'job_code' => $job->job_code,
+            'customer_name' => $job->customer_name,
+            'customer_phone' => $job->customer_phone,
+            'customer_address' => $job->customer?->address,
+            'tv_model' => $job->tv_model,
+            'issue' => $job->issue ?: $job->problem,
+            'technician_notes' => $job->technician_notes,
+            'assigned_staff_name' => $job->assignedStaff?->name,
+            'job_status' => (string) $job->status,
+            'amount_iqd' => $amount,
+            'paid_iqd' => $paid,
+            'remaining_iqd' => max($amount - $paid, 0),
+            'parts_used' => $job->stockMovements
+                ->where('type', 'out')
+                ->values()
+                ->map(fn ($movement): array => [
+                    'id' => (string) $movement->id,
+                    'part_name' => $movement->inventoryItem?->name,
+                    'part_sku' => $movement->inventoryItem?->sku,
+                    'quantity' => (int) $movement->quantity,
+                    'reason' => $movement->reason,
+                ])
+                ->all(),
         ];
     }
 

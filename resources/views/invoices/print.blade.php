@@ -1,42 +1,56 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Invoice {{ $job->job_code }}</title>
-    <style>
-        :root {
-            --bg: #f4f6fb;
-            --ink: #0f172a;
-            --muted: #475569;
+            --bg: #090d17;
+            --bg-soft: #131a2d;
+            --ink: #f5f7fb;
+            --muted: rgba(255,255,255,0.68);
+            --line: rgba(202, 164, 90, 0.28);
+            --brand: #0b1020;
+            --brand-soft: rgba(255,255,255,0.06);
+            --gold: #caa45a;
+            --ok: #8be2b3;
+            --ok-soft: rgba(52, 211, 153, 0.15);
+            --warn: #f4c07a;
+            --warn-soft: rgba(202, 164, 90, 0.14);
             --line: #dbe3ef;
             --brand: #0f4c81;
             --brand-soft: #e8f1fb;
             --ok: #0f7a4a;
-            --ok-soft: #dff7ea;
+            background: radial-gradient(circle at 10% 10%, #1c2441 0%, #0b1020 48%, var(--bg) 100%);
             --warn: #9a3412;
-            --warn-soft: #fff0e6;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
         }
 
         * { box-sizing: border-box; }
 
         body {
             margin: 0;
-            background: radial-gradient(circle at 10% 10%, #eef5ff 0%, var(--bg) 45%, #f6f8fc 100%);
-            color: var(--ink);
-            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(180deg, rgba(13, 17, 31, 0.98) 0%, rgba(14, 20, 36, 0.98) 100%);
+            border: 1px solid var(--line);
+            border-radius: 26px;
             padding: 24px;
-        }
+            box-shadow: 0 26px 80px rgba(0, 0, 0, 0.45);
 
         .invoice-shell {
             max-width: 940px;
-            margin: 0 auto;
+            position: relative;
+            background: linear-gradient(135deg, #0b1020 0%, #121a2f 62%, #151f37 100%);
             background: #ffffff;
             border: 1px solid var(--line);
             border-radius: 20px;
             overflow: hidden;
             box-shadow: 0 16px 45px rgba(15, 23, 42, 0.09);
         }
+            border-bottom: 1px solid var(--line);
+        }
+
+        .topbar::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at top left, rgba(202, 164, 90, 0.18), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(255,255,255,0.08), transparent 20%);
+            pointer-events: none;
 
         .topbar {
             background: linear-gradient(120deg, #0f4c81 0%, #145da0 55%, #1c75bc 100%);
@@ -49,14 +63,14 @@
         }
 
         .brand-row {
-            display: flex;
-            align-items: center;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #f4d896 0%, #caa45a 35%, #4c3311 100%);
             gap: 12px;
         }
-
+            color: #0b1020;
         .logo-badge {
             width: 54px;
-            height: 54px;
+            box-shadow: 0 0 0 2px rgba(202, 164, 90, 0.22), inset 0 0 0 1px rgba(255,255,255,0.25);
             border-radius: 14px;
             background: linear-gradient(140deg, #ffffff 0%, #dbeafe 100%);
             display: grid;
@@ -67,16 +81,18 @@
             box-shadow: inset 0 0 0 1px rgba(15, 76, 129, 0.18);
         }
 
-        .brand-wrap h1 {
+            color: rgba(255,255,255,0.72);
             margin: 0;
             font-size: 28px;
             letter-spacing: 0.01em;
         }
 
-        .brand-wrap p {
-            margin: 8px 0 0;
-            opacity: 0.92;
+            position: relative;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--line);
+            border-radius: 18px;
             font-size: 13px;
+            backdrop-filter: blur(8px);
         }
 
         .invoice-meta {
@@ -88,17 +104,19 @@
         }
 
         .meta-line {
+            color: #f2d594;
             display: flex;
             justify-content: space-between;
             font-size: 13px;
             padding: 4px 0;
+            background: radial-gradient(circle at top, #1a223b 0%, #0e1424 65%, #0a0f1b 100%);
         }
 
         .meta-line strong {
             font-weight: 700;
-        }
+            border-radius: 20px;
 
-        .content {
+            background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%);
             padding: 20px 22px 24px;
         }
 
@@ -106,13 +124,14 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 14px;
-            margin-bottom: 14px;
+            color: var(--gold);
         }
 
         .panel {
             border: 1px solid var(--line);
             border-radius: 14px;
             padding: 14px;
+            color: var(--muted);
             background: #ffffff;
         }
 
@@ -140,9 +159,9 @@
         .chip {
             border-radius: 999px;
             padding: 5px 10px;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.02em;
+                background: #111a30;
+                border-bottom: 1px solid var(--line);
+                color: #f3d79c;
         }
 
         .chip.brand { background: var(--brand-soft); color: var(--brand); }
@@ -150,54 +169,58 @@
         .chip.warn { background: var(--warn-soft); color: var(--warn); }
 
         table {
-            width: 100%;
+                border-bottom: 1px solid rgba(202, 164, 90, 0.12);
             border-collapse: collapse;
             margin-top: 10px;
+                color: rgba(255,255,255,0.8);
         }
 
         thead th {
-            text-align: left;
+                background: rgba(0, 0, 0, 0.12);
             background: #eef3fb;
             border-bottom: 1px solid var(--line);
             color: #1e3a5f;
+            .money { color: #f3d79c; }
             font-size: 12px;
             text-transform: uppercase;
             letter-spacing: 0.08em;
             padding: 10px;
         }
 
-        tbody td {
+                border-radius: 18px;
             border-bottom: 1px solid #edf1f7;
+                background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%);
             padding: 9px 10px;
             font-size: 13px;
         }
 
         tbody tr:nth-child(even) {
-            background: #fbfdff;
+                border-bottom: 1px solid rgba(202, 164, 90, 0.12);
+                color: rgba(255,255,255,0.75);
         }
 
         .text-right { text-align: right; }
 
         .money { font-weight: 700; color: #0f172a; }
-
+            .totals .balance-due { color: #f3d79c; font-weight: 800; }
         .totals {
             width: 360px;
             margin-left: auto;
             margin-top: 14px;
-            border: 1px solid var(--line);
+                color: rgba(255,255,255,0.58);
             border-radius: 12px;
             overflow: hidden;
         }
 
-        .totals td {
-            padding: 10px 12px;
+                border: 1px dashed rgba(202, 164, 90, 0.36);
+                border-radius: 18px;
             font-size: 13px;
-            border-bottom: 1px solid #edf1f7;
+                background: rgba(255,255,255,0.04);
         }
 
         .totals tr:last-child td { border-bottom: none; }
 
-        .totals .summary { font-weight: 700; background: #f1f6ff; }
+                color: rgba(255,255,255,0.62);
 
         .totals .balance-ok { color: var(--ok); font-weight: 800; }
         .totals .balance-due { color: #b42318; font-weight: 800; }
@@ -205,22 +228,22 @@
         .footer-note {
             margin-top: 14px;
             font-size: 12px;
-            color: #64748b;
+                border: 1px solid rgba(202, 164, 90, 0.25);
             text-align: center;
         }
 
         .actions {
             margin-top: 14px;
-            text-align: right;
-        }
-
-        .utility-grid {
+                border: 1px solid rgba(202, 164, 90, 0.4);
+                background: linear-gradient(180deg, #d4af67 0%, #b3873e 100%);
+                color: #0b1020;
+                border-radius: 14px;
             display: grid;
             grid-template-columns: 1fr 220px;
             gap: 14px;
             margin-top: 14px;
         }
-
+            .print-btn:hover { background: linear-gradient(180deg, #ddb978 0%, #bc9048 100%); }
         .verify-box {
             border: 1px dashed #b6c4d8;
             border-radius: 12px;
@@ -232,7 +255,7 @@
         .verify-box p {
             margin: 5px 0 0;
             font-size: 11px;
-            color: #47607f;
+                            <p>Professional Repair, Trusted Parts, Transparent Billing</p>
             line-height: 1.45;
             word-break: break-all;
         }

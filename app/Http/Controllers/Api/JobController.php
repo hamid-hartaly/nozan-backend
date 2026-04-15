@@ -26,8 +26,36 @@ class JobController extends Controller
         abort_unless($user instanceof User && $user->roleEnum()->canAccessJobs(), 403);
 
         $query = ServiceJob::query()
-            ->with(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages', 'returnedFromJob:id,job_code'])
-            ->latest();
+            ->with(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages', 'returnedFromJob:id,job_code']);
+
+        $filters = $request->validate([
+            'promise' => ['nullable', Rule::in(['today', 'tomorrow', 'overdue', 'all', 'none'])],
+            'promised_day' => ['nullable', 'date'],
+            'overdue_promises' => ['nullable', 'boolean'],
+            'promise_sort' => ['nullable', Rule::in(['none', 'closest_first', 'overdue_first'])],
+        ]);
+
+        $promisePreset = strtolower((string) ($filters['promise'] ?? ''));
+        $explicitPromisedDay = ! empty($filters['promised_day']);
+        $explicitOverdueFlag = $request->query('overdue_promises') !== null;
+
+        $promisedDayFilter = $explicitPromisedDay
+            ? Carbon::parse((string) $filters['promised_day'])->toDateString()
+            : null;
+
+        $overdueOnlyFilter = $explicitOverdueFlag
+            ? $request->boolean('overdue_promises')
+            : false;
+
+        if (! $explicitPromisedDay && ! $explicitOverdueFlag) {
+            if ($promisePreset === 'today') {
+                $promisedDayFilter = Carbon::today()->toDateString();
+            } elseif ($promisePreset === 'tomorrow') {
+                $promisedDayFilter = Carbon::tomorrow()->toDateString();
+            } elseif ($promisePreset === 'overdue') {
+                $overdueOnlyFilter = true;
+            }
+        }
 
         if ($search = $request->string('search')->toString()) {
             $query->where(function ($builder) use ($search): void {
@@ -53,6 +81,37 @@ class JobController extends Controller
 
         if ($technician = $request->string('technician')->toString()) {
             $query->where('assigned_staff_uid', $technician);
+        }
+
+        if ($promisedDayFilter !== null) {
+            $query->whereDate('promised_completion_at', $promisedDayFilter);
+        }
+
+        if ($overdueOnlyFilter) {
+            $query
+                ->whereNotNull('promised_completion_at')
+                ->where('promised_completion_at', '<', Carbon::now())
+                ->whereIn('status', ['PENDING', 'REPAIR']);
+        }
+
+        $promiseSort = $filters['promise_sort'] ?? 'none';
+
+        if ($promiseSort === 'closest_first') {
+            $query
+                ->orderByRaw('CASE WHEN promised_completion_at IS NULL THEN 1 ELSE 0 END ASC')
+                ->orderBy('promised_completion_at')
+                ->latest();
+        } elseif ($promiseSort === 'overdue_first') {
+            $query
+                ->orderByRaw(
+                    "CASE WHEN promised_completion_at IS NOT NULL AND promised_completion_at < ? AND status IN ('PENDING','REPAIR') THEN 0 ELSE 1 END ASC",
+                    [Carbon::now()->toDateTimeString()]
+                )
+                ->orderByRaw('CASE WHEN promised_completion_at IS NULL THEN 1 ELSE 0 END ASC')
+                ->orderBy('promised_completion_at')
+                ->latest();
+        } else {
+            $query->latest();
         }
 
         $jobs = $query->paginate($request->integer('per_page', 20));
@@ -142,6 +201,7 @@ class JobController extends Controller
             'warranty_company' => ['nullable', 'string', 'max:255', 'required_if:is_in_warranty,true'],
             'notes' => ['nullable', 'string'],
             'assigned_staff_uid' => ['nullable', 'integer', Rule::exists('users', 'id')],
+            'promised_completion_at' => ['nullable', 'date'],
         ]);
 
         $customer = null;
@@ -181,6 +241,9 @@ class JobController extends Controller
             'assigned_staff_uid' => $assignedStaff?->id,
             'notes' => $payload['notes'] ?? null,
             'created_by_user_id' => $user->id,
+            'promised_completion_at' => isset($payload['promised_completion_at'])
+                ? Carbon::parse((string) $payload['promised_completion_at'])
+                : null,
         ]);
 
         // Send WhatsApp notification for new job
@@ -216,6 +279,7 @@ class JobController extends Controller
             'final_price_iqd' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'is_in_warranty' => ['sometimes', 'boolean'],
             'warranty_company' => ['nullable', 'string', 'max:255', 'required_if:is_in_warranty,true'],
+            'promised_completion_at' => ['sometimes', 'nullable', 'date'],
         ]);
 
         if (array_key_exists('tv_model', $payload)) {
@@ -258,6 +322,12 @@ class JobController extends Controller
         if (array_key_exists('warranty_company', $payload)) {
             $job->warranty_company = ($payload['is_in_warranty'] ?? $job->is_in_warranty)
                 ? ($payload['warranty_company'] ?? null)
+                : null;
+        }
+
+        if (array_key_exists('promised_completion_at', $payload)) {
+            $job->promised_completion_at = $payload['promised_completion_at']
+                ? Carbon::parse((string) $payload['promised_completion_at'])
                 : null;
         }
 
@@ -606,6 +676,7 @@ class JobController extends Controller
             'not_fixed_reason' => $job->not_fixed_reason,
             'repair_started_at' => $job->repair_started_at?->toIso8601String(),
             'received_at' => $job->received_at?->toIso8601String(),
+            'promised_completion_at' => $job->promised_completion_at?->toIso8601String(),
             'finished_at' => $job->finished_at?->toIso8601String(),
             'out_at' => $job->out_at?->toIso8601String(),
             'created_at' => $job->created_at?->toIso8601String(),

@@ -340,6 +340,47 @@ class WhatsAppService
         return $safeName !== '' ? $safeName : 'TV';
     }
 
+    public function sendPromiseReminderMessage(ServiceJob $job): bool
+    {
+        if (! $this->isConfigured()) {
+            Log::warning('WhatsApp: Skipping promise reminder - service not configured', [
+                'job_code' => $job->job_code,
+            ]);
+
+            return false;
+        }
+
+        if (! $job->customer_phone) {
+            Log::info('WhatsApp: Skipping promise reminder - missing customer phone', [
+                'job_code' => $job->job_code,
+            ]);
+
+            return false;
+        }
+
+        $customerName = $this->safeCustomerName($job->customer_name);
+        $deviceName = $this->safeDeviceName($job->tv_model);
+        $promiseDate = $job->promised_completion_at
+            ? $job->promised_completion_at->format('Y-m-d')
+            : 'N/A';
+
+        $message = sprintf(
+            "سڵاو %s،\n\nیادکردنەوە: ئامێرەکەتان بۆ چاككراوە سبەینێ (%s) دیاری کراوە.\n\nژمارەی جۆب: %s\nئامێر: %s\n\nژمارەی سەنتەر: %s\n\nمرحبا %s،\n\nتذكير: موعد تسليم جهازكم هو %s.\n\nرقم الطلب: %s\nالجهاز: %s\n\nرقم المركز: %s",
+            $customerName,
+            $promiseDate,
+            (string) $job->job_code,
+            $deviceName,
+            $this->supportNumber,
+            $customerName,
+            $promiseDate,
+            (string) $job->job_code,
+            $deviceName,
+            $this->supportNumber,
+        );
+
+        return $this->sendMessage($job->customer_phone, $message, 'promise_reminder');
+    }
+
     private function safeCategory(?string $category): string
     {
         $safeCategory = trim((string) $category);

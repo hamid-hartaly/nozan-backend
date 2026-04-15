@@ -47,6 +47,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $resolution
  * @property string|null $not_fixed_reason
  * @property Carbon|null $received_at
+ * @property Carbon|null $promised_completion_at
  * @property Carbon|null $repair_started_at
  * @property Carbon|null $finished_at
  * @property Carbon|null $out_at
@@ -94,6 +95,7 @@ class ServiceJob extends Model
         'created_by_user_id',
         'notes',
         'received_at',
+        'promised_completion_at',
         'repair_started_at',
         'finished_at',
         'out_at',
@@ -122,6 +124,7 @@ class ServiceJob extends Model
             'whatsapp_finished_sent' => 'boolean',
             'whatsapp_pickup_sent' => 'boolean',
             'received_at' => 'datetime',
+            'promised_completion_at' => 'datetime',
             'repair_started_at' => 'datetime',
             'finished_at' => 'datetime',
             'out_at' => 'datetime',
