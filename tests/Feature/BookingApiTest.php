@@ -16,6 +16,7 @@ class BookingApiTest extends TestCase
         $response = $this->post('/api/bookings', [
             'name' => 'Ahmed Kareem',
             'phone' => '07502405006',
+            'device_type' => 'television',
             'tv_model' => 'LG 55UQ',
             'description' => 'No display but sound works',
             'address' => 'Hawler - 60m Street',
@@ -43,6 +44,7 @@ class BookingApiTest extends TestCase
         $response = $this->post('/api/bookings', [
             'name' => 'Sara Jamal',
             'phone' => '07701234567',
+            'device_type' => 'television',
             'tv_model' => 'Samsung 50Q',
             'description' => 'Screen flickers after a few minutes',
             'address' => 'Erbil - Dream City',
@@ -69,6 +71,7 @@ class BookingApiTest extends TestCase
             ->assertJsonValidationErrors([
                 'name',
                 'phone',
+                'device_type',
                 'tv_model',
                 'description',
                 'address',
