@@ -502,4 +502,3 @@ class JobApiTest extends TestCase
         Carbon::setTestNow();
     }
 }
-

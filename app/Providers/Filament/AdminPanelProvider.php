@@ -2,9 +2,9 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Widgets\OperationsOverview;
 use App\Filament\Widgets\OperationsQuickActions;
 use App\Filament\Widgets\OpsOverview;
-use App\Filament\Widgets\OperationsOverview;
 use App\Filament\Widgets\QuickLinks;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;

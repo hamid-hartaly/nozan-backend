@@ -10,16 +10,16 @@ return new class extends Migration
     {
         Schema::table('service_jobs', function (Blueprint $table) {
             // Track WhatsApp notifications sent for different events
-            if (!Schema::hasColumn('service_jobs', 'whatsapp_created_sent')) {
+            if (! Schema::hasColumn('service_jobs', 'whatsapp_created_sent')) {
                 $table->boolean('whatsapp_created_sent')->default(false)->after('whatsapp_sent');
             }
-            if (!Schema::hasColumn('service_jobs', 'whatsapp_repair_started_sent')) {
+            if (! Schema::hasColumn('service_jobs', 'whatsapp_repair_started_sent')) {
                 $table->boolean('whatsapp_repair_started_sent')->default(false)->after('whatsapp_created_sent');
             }
-            if (!Schema::hasColumn('service_jobs', 'whatsapp_finished_sent')) {
+            if (! Schema::hasColumn('service_jobs', 'whatsapp_finished_sent')) {
                 $table->boolean('whatsapp_finished_sent')->default(false)->after('whatsapp_repair_started_sent');
             }
-            if (!Schema::hasColumn('service_jobs', 'whatsapp_pickup_sent')) {
+            if (! Schema::hasColumn('service_jobs', 'whatsapp_pickup_sent')) {
                 $table->boolean('whatsapp_pickup_sent')->default(false)->after('whatsapp_finished_sent');
             }
         });

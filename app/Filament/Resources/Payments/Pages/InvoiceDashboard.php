@@ -8,8 +8,8 @@ use App\Models\ServiceJob;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Resources\Pages\Page;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -242,7 +242,7 @@ class InvoiceDashboard extends Page implements HasTable
                 Action::make('printInvoice')
                     ->label('Print')
                     ->icon('heroicon-o-printer')
-                    ->url(fn (ServiceJob $record): string => url('/admin/invoices/' . $record->id . '/print'))
+                    ->url(fn (ServiceJob $record): string => url('/admin/invoices/'.$record->id.'/print'))
                     ->openUrlInNewTab(),
             ])
             ->defaultSort('updated_at', 'desc');

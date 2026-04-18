@@ -74,7 +74,7 @@ class OpsOverview extends BaseWidget
             Stat::make('Pending Queue', $pendingJobs)
                 ->description('Tickets waiting for workshop action')
                 ->color($pendingJobs > 0 ? 'warning' : 'success'),
-            Stat::make('Billing Snapshot', number_format($totalInvoiced) . ' / ' . number_format($totalPaid) . ' IQD')
+            Stat::make('Billing Snapshot', number_format($totalInvoiced).' / '.number_format($totalPaid).' IQD')
                 ->description('Invoiced / collected')
                 ->color($totalPaid < $totalInvoiced ? 'danger' : 'success'),
             Stat::make('Finished Today', $finishedToday)

@@ -217,7 +217,7 @@ class AdminManagementController extends Controller
         $businessAccountId = trim((string) config('services.whatsapp.business_account_id', ''));
         $accessToken = trim((string) config('services.whatsapp.access_token', ''));
         $supportNumber = trim((string) config('services.whatsapp.support_number', '07704330005'));
-        $diagnostics = (new WhatsAppService())->configDiagnostics();
+        $diagnostics = (new WhatsAppService)->configDiagnostics();
 
         $missing = [];
 
@@ -237,8 +237,8 @@ class AdminManagementController extends Controller
             'configured' => (bool) ($diagnostics['valid'] ?? false),
             'missing' => $missing,
             'support_number' => $supportNumber,
-            'phone_number_id_preview' => $phoneNumberId !== '' ? substr($phoneNumberId, 0, 6) . '***' : null,
-            'business_account_id_preview' => $businessAccountId !== '' ? substr($businessAccountId, 0, 6) . '***' : null,
+            'phone_number_id_preview' => $phoneNumberId !== '' ? substr($phoneNumberId, 0, 6).'***' : null,
+            'business_account_id_preview' => $businessAccountId !== '' ? substr($businessAccountId, 0, 6).'***' : null,
             'diagnostics' => $diagnostics,
         ]);
     }
@@ -252,10 +252,10 @@ class AdminManagementController extends Controller
             'customer_name' => ['nullable', 'string', 'max:120'],
         ]);
 
-        $whatsappService = new WhatsAppService();
+        $whatsappService = new WhatsAppService;
         $diagnostics = $whatsappService->configDiagnostics();
 
-        if (!$whatsappService->isConfigured()) {
+        if (! $whatsappService->isConfigured()) {
             return response()->json([
                 'message' => 'WhatsApp is not configured correctly.',
                 'hint' => $diagnostics['hint'] ?? null,
@@ -268,7 +268,7 @@ class AdminManagementController extends Controller
             (string) ($payload['customer_name'] ?? 'Customer'),
         );
 
-        if (!$sent) {
+        if (! $sent) {
             return response()->json([
                 'message' => 'Test message was not sent. Please check phone format and WhatsApp provider credentials.',
             ], 422);

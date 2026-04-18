@@ -7,6 +7,7 @@ use App\Models\InventoryItem;
 use App\Models\ServiceJob;
 use App\Models\StockMovement;
 use App\Models\User;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -289,7 +290,7 @@ class InventoryController extends Controller
      */
     private function transformItem(InventoryItem $item): array
     {
-        /** @var \Illuminate\Filesystem\FilesystemAdapter $publicDisk */
+        /** @var FilesystemAdapter $publicDisk */
         $publicDisk = Storage::disk('public');
 
         return [

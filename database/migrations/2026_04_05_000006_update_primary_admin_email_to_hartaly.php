@@ -28,8 +28,8 @@ return new class extends Migration
             ->exists();
 
         $updates = [
-            'name'       => 'HamidHartaly',
-            'password'   => Hash::make('H@mid1990'),
+            'name' => 'HamidHartaly',
+            'password' => Hash::make('H@mid1990'),
             'updated_at' => now(),
         ];
 

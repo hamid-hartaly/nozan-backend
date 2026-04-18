@@ -3,7 +3,7 @@
 use App\Http\Controllers\Api\FinanceController;
 use Illuminate\Support\Facades\Route;
 
-require __DIR__ . '/api.php';
+require __DIR__.'/api.php';
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('finance')->group(function () {

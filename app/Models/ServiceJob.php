@@ -143,7 +143,7 @@ class ServiceJob extends Model
     {
         static::creating(function (ServiceJob $job): void {
             if (blank($job->job_code)) {
-                $job->job_code = 'NGS-' . now()->format('ymd') . '-' . str_pad((string) random_int(1, 9999), 4, '0', STR_PAD_LEFT);
+                $job->job_code = 'NGS-'.now()->format('ymd').'-'.str_pad((string) random_int(1, 9999), 4, '0', STR_PAD_LEFT);
             }
 
             $job->customer_name ??= $job->customer?->name;
@@ -259,4 +259,3 @@ class ServiceJob extends Model
         return $appKey !== '' ? $appKey : 'nozan-tracking-secret';
     }
 }
-

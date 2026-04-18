@@ -3,17 +3,22 @@
 namespace App\Services;
 
 use App\Enums\WhatsAppEvent;
-use Illuminate\Support\Facades\Http;
 use App\Models\ServiceJob;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class WhatsAppService
 {
     private string $phoneNumberId;
+
     private string $businessAccountId;
+
     private string $accessToken;
+
     private string $supportNumber;
+
     private bool $verifySsl;
+
     private ?string $caBundle;
 
     public function configDiagnostics(): array
@@ -28,17 +33,17 @@ class WhatsAppService
         $tokenLooksLikePhone = preg_match('/^0[0-9]{10}$/', $accessToken) === 1;
         $tokenLooksPlausible = strlen($accessToken) >= 20 && preg_match('/[A-Za-z]/', $accessToken) === 1;
 
-        $valid = $phoneIdPresent && $accessTokenPresent && $phoneIdLooksNumericId && !$phoneIdLooksLocalPhone && $tokenLooksPlausible && !$tokenLooksLikePhone;
+        $valid = $phoneIdPresent && $accessTokenPresent && $phoneIdLooksNumericId && ! $phoneIdLooksLocalPhone && $tokenLooksPlausible && ! $tokenLooksLikePhone;
 
         $hint = null;
 
-        if (!$phoneIdPresent || !$accessTokenPresent) {
+        if (! $phoneIdPresent || ! $accessTokenPresent) {
             $hint = 'Missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN.';
         } elseif ($phoneIdLooksLocalPhone) {
             $hint = 'WHATSAPP_PHONE_NUMBER_ID looks like a local phone number (07...). Use Meta Phone Number ID from WhatsApp Cloud API.';
-        } elseif (!$phoneIdLooksNumericId) {
+        } elseif (! $phoneIdLooksNumericId) {
             $hint = 'WHATSAPP_PHONE_NUMBER_ID should be a numeric Meta ID.';
-        } elseif ($tokenLooksLikePhone || !$tokenLooksPlausible) {
+        } elseif ($tokenLooksLikePhone || ! $tokenLooksPlausible) {
             $hint = 'WHATSAPP_ACCESS_TOKEN looks invalid. Use a real Meta long-lived access token, not a phone number.';
         }
 
@@ -70,19 +75,21 @@ class WhatsAppService
 
     public function sendJobCreatedMessage(ServiceJob $job): bool
     {
-        if (!$this->isConfigured()) {
+        if (! $this->isConfigured()) {
             Log::warning('WhatsApp: Skipping job created message - service not configured', [
                 'job_code' => $job->job_code,
                 'phone_number_id_present' => $this->phoneNumberId !== '',
                 'access_token_present' => $this->accessToken !== '',
             ]);
+
             return false;
         }
 
-        if (!$job->customer_phone) {
+        if (! $job->customer_phone) {
             Log::info('WhatsApp: Skipping job created message - missing customer phone', [
                 'job_code' => $job->job_code,
             ]);
+
             return false;
         }
 
@@ -112,16 +119,18 @@ class WhatsAppService
 
     public function sendBookingSubmittedMessage(string $customerPhone, ?string $customerName = null): bool
     {
-        if (!$this->isConfigured()) {
+        if (! $this->isConfigured()) {
             Log::warning('WhatsApp: Skipping booking submitted message - service not configured', [
                 'phone_number_id_present' => $this->phoneNumberId !== '',
                 'access_token_present' => $this->accessToken !== '',
             ]);
+
             return false;
         }
 
-        if (!$customerPhone) {
+        if (! $customerPhone) {
             Log::info('WhatsApp: Skipping booking submitted message - missing customer phone');
+
             return false;
         }
 
@@ -140,16 +149,18 @@ class WhatsAppService
 
     public function sendManualTestMessage(string $phoneNumber, ?string $customerName = null): bool
     {
-        if (!$this->isConfigured()) {
+        if (! $this->isConfigured()) {
             Log::warning('WhatsApp: Skipping manual test message - service not configured', [
                 'phone_number_id_present' => $this->phoneNumberId !== '',
                 'access_token_present' => $this->accessToken !== '',
             ]);
+
             return false;
         }
 
-        if (!trim($phoneNumber)) {
+        if (! trim($phoneNumber)) {
             Log::info('WhatsApp: Skipping manual test message - missing phone number');
+
             return false;
         }
 
@@ -168,7 +179,7 @@ class WhatsAppService
 
     public function sendRepairStartedMessage(ServiceJob $job): bool
     {
-        if (!$this->isConfigured() || !$job->customer_phone) {
+        if (! $this->isConfigured() || ! $job->customer_phone) {
             return false;
         }
 
@@ -183,7 +194,7 @@ class WhatsAppService
 
     public function sendJobFinishedMessage(ServiceJob $job): bool
     {
-        if (!$this->isConfigured() || !$job->customer_phone) {
+        if (! $this->isConfigured() || ! $job->customer_phone) {
             return false;
         }
 
@@ -200,7 +211,7 @@ class WhatsAppService
 
     public function sendReadyForPickupMessage(ServiceJob $job): bool
     {
-        if (!$this->isConfigured() || !$job->customer_phone) {
+        if (! $this->isConfigured() || ! $job->customer_phone) {
             return false;
         }
 
@@ -217,7 +228,7 @@ class WhatsAppService
 
     public function sendPaymentRecordedMessage(ServiceJob $job, int $amountIqd): bool
     {
-        if (!$this->isConfigured() || !$job->customer_phone) {
+        if (! $this->isConfigured() || ! $job->customer_phone) {
             return false;
         }
 
@@ -240,12 +251,13 @@ class WhatsAppService
             $formattedPhone = $this->formatPhoneNumber($phoneNumber);
             $recipientPhone = ltrim($formattedPhone, '+');
 
-            if (!$this->isConfigured()) {
+            if (! $this->isConfigured()) {
                 Log::warning('WhatsApp not configured, would send:', [
                     'phone' => $formattedPhone,
                     'message' => $messageBody,
                     'template' => $templateName,
                 ]);
+
                 return false;
             }
 
@@ -253,20 +265,19 @@ class WhatsAppService
                 ->withOptions([
                     'verify' => $this->caBundle ?? $this->verifySsl,
                 ])
-                ->acceptJson()
-                ;
+                ->acceptJson();
 
             $response = $request->post(sprintf('https://graph.facebook.com/v20.0/%s/messages', $this->phoneNumberId), [
-                    'messaging_product' => 'whatsapp',
-                    'to' => $recipientPhone,
-                    'type' => 'text',
-                    'text' => [
-                        'preview_url' => false,
-                        'body' => $messageBody,
-                    ],
-                ]);
+                'messaging_product' => 'whatsapp',
+                'to' => $recipientPhone,
+                'type' => 'text',
+                'text' => [
+                    'preview_url' => false,
+                    'body' => $messageBody,
+                ],
+            ]);
 
-            if (!$response->successful()) {
+            if (! $response->successful()) {
                 Log::error('WhatsApp message send failed', [
                     'phone' => $formattedPhone,
                     'template' => $templateName,
@@ -289,6 +300,7 @@ class WhatsAppService
                 'error' => $e->getMessage(),
                 'template' => $templateName,
             ]);
+
             return false;
         }
     }
@@ -305,16 +317,16 @@ class WhatsAppService
 
         // If starts with 964 (Iraq country code), add +
         if (str_starts_with($cleaned, '964')) {
-            return '+' . $cleaned;
+            return '+'.$cleaned;
         }
 
         // If starts with 07 or 09, replace with +964 7 or +964 9
         if (str_starts_with($cleaned, '07') || str_starts_with($cleaned, '09')) {
-            return '+964' . substr($cleaned, 1);
+            return '+964'.substr($cleaned, 1);
         }
 
         // Otherwise, assume Iraq and prefix with +964
-        return '+964' . $cleaned;
+        return '+964'.$cleaned;
     }
 
     private function buildTrackingUrl(ServiceJob $job): string

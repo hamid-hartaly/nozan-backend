@@ -8,7 +8,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 
-require __DIR__ . '/../vendor/autoload.php';
+require __DIR__.'/../vendor/autoload.php';
 
 function buildFreshApp(string $basePath, string $apiPath, string $webPath): Application
 {
@@ -16,7 +16,7 @@ function buildFreshApp(string $basePath, string $apiPath, string $webPath): Appl
         ->withRouting(
             api: $apiPath,
             web: $webPath,
-            commands: $basePath . '/routes/console.php',
+            commands: $basePath.'/routes/console.php',
             health: '/up',
         )
         ->withMiddleware(function (Middleware $middleware): void {
@@ -27,7 +27,7 @@ function buildFreshApp(string $basePath, string $apiPath, string $webPath): Appl
         })
         ->create();
 
-    $app->instance('files', new Filesystem());
+    $app->instance('files', new Filesystem);
 
     return $app;
 }
@@ -82,6 +82,7 @@ function extractRouteBlock(string $source, string $blockStart): string
 
         if ($character === '{') {
             $depth++;
+
             continue;
         }
 
@@ -110,10 +111,10 @@ function extractRouteBlock(string $source, string $blockStart): string
 function buildAuthSubsetApi(string $header, array $blocks): string
 {
     return rtrim($header)
-        . PHP_EOL . PHP_EOL
-        . "Route::middleware('auth:sanctum')->group(function () {" . PHP_EOL
-        . implode(PHP_EOL . PHP_EOL, $blocks) . PHP_EOL
-        . '});' . PHP_EOL;
+        .PHP_EOL.PHP_EOL
+        ."Route::middleware('auth:sanctum')->group(function () {".PHP_EOL
+        .implode(PHP_EOL.PHP_EOL, $blocks).PHP_EOL
+        .'});'.PHP_EOL;
 }
 
 function stripFallbackWebRoute(string $webSource): string
@@ -130,7 +131,7 @@ function stripFallbackWebRoute(string $webSource): string
         (string) $withoutComment,
     );
 
-    return preg_replace("/\n{3,}/", PHP_EOL . PHP_EOL, rtrim((string) $withoutRoute)) . PHP_EOL;
+    return preg_replace("/\n{3,}/", PHP_EOL.PHP_EOL, rtrim((string) $withoutRoute)).PHP_EOL;
 }
 
 function printTable(array $headers, array $rows): void
@@ -149,44 +150,44 @@ function printTable(array $headers, array $rows): void
 
     $separator = '+';
     foreach ($widths as $width) {
-        $separator .= str_repeat('-', $width + 2) . '+';
+        $separator .= str_repeat('-', $width + 2).'+';
     }
 
-    echo $separator . PHP_EOL;
+    echo $separator.PHP_EOL;
     echo '|';
     foreach ($headers as $index => $header) {
-        echo ' ' . str_pad($header, $widths[$index]) . ' |';
+        echo ' '.str_pad($header, $widths[$index]).' |';
     }
     echo PHP_EOL;
-    echo $separator . PHP_EOL;
+    echo $separator.PHP_EOL;
 
     foreach ($rows as $row) {
         echo '|';
         foreach ($row as $index => $cell) {
-            echo ' ' . str_pad($cell, $widths[$index]) . ' |';
+            echo ' '.str_pad($cell, $widths[$index]).' |';
         }
         echo PHP_EOL;
     }
 
-    echo $separator . PHP_EOL;
+    echo $separator.PHP_EOL;
 }
 
-$basePath = realpath(__DIR__ . '/..');
+$basePath = realpath(__DIR__.'/..');
 
 if ($basePath === false) {
-    fwrite(STDERR, "Unable to resolve backend base path." . PHP_EOL);
+    fwrite(STDERR, 'Unable to resolve backend base path.'.PHP_EOL);
     exit(1);
 }
 
-$tempDir = $basePath . '/storage/framework/route-probes';
+$tempDir = $basePath.'/storage/framework/route-probes';
 
 if (! is_dir($tempDir) && ! mkdir($tempDir, 0777, true) && ! is_dir($tempDir)) {
-    fwrite(STDERR, "Unable to create temporary probe directory: {$tempDir}" . PHP_EOL);
+    fwrite(STDERR, "Unable to create temporary probe directory: {$tempDir}".PHP_EOL);
     exit(1);
 }
 
-$apiSource = (string) file_get_contents($basePath . '/routes/api.php');
-$webSource = (string) file_get_contents($basePath . '/routes/web.php');
+$apiSource = (string) file_get_contents($basePath.'/routes/api.php');
+$webSource = (string) file_get_contents($basePath.'/routes/web.php');
 $emptyWebSource = "<?php\n";
 $webSourceWithoutFallback = stripFallbackWebRoute($webSource);
 
@@ -194,7 +195,7 @@ $mainAuthAnchor = "    Route::get('/app-config', [AppConfigController::class, 'i
 $mainAuthAnchorOffset = strpos($apiSource, $mainAuthAnchor);
 
 if ($mainAuthAnchorOffset === false) {
-    fwrite(STDERR, "Unable to find the main authenticated finance/dashboard section in routes/api.php." . PHP_EOL);
+    fwrite(STDERR, 'Unable to find the main authenticated finance/dashboard section in routes/api.php.'.PHP_EOL);
     exit(1);
 }
 
@@ -202,14 +203,14 @@ $authGroupStart = "Route::middleware('auth:sanctum')->group(function () {";
 $authGroupOffset = strrpos(substr($apiSource, 0, $mainAuthAnchorOffset), $authGroupStart);
 
 if ($authGroupOffset === false) {
-    fwrite(STDERR, "Unable to locate the main auth:sanctum route group wrapper in routes/api.php." . PHP_EOL);
+    fwrite(STDERR, 'Unable to locate the main auth:sanctum route group wrapper in routes/api.php.'.PHP_EOL);
     exit(1);
 }
 
 $apiHeader = substr($apiSource, 0, $authGroupOffset);
 $jobsBlock = extractRouteBlock($apiSource, "Route::prefix('jobs')->group(function () {");
 $customersBlock = extractRouteBlock($apiSource, "Route::prefix('customers')->group(function () {");
-$financeBlock = injectInvoicePaymentRoute(extractRouteBlock($apiSource, "Route::prefix('finance')->group(function () {") );
+$financeBlock = injectInvoicePaymentRoute(extractRouteBlock($apiSource, "Route::prefix('finance')->group(function () {"));
 $inventoryBlock = extractRouteBlock($apiSource, "Route::prefix('inventory')->group(function () {");
 $adminBlock = extractRouteBlock($apiSource, "Route::prefix('admin')->group(function () {");
 $apiWithInjectedRoute = injectInvoicePaymentRoute($apiSource);
@@ -354,21 +355,21 @@ try {
                 $scenario['label'],
                 'error',
                 '-',
-                get_class($exception) . ': ' . $exception->getMessage(),
+                get_class($exception).': '.$exception->getMessage(),
                 '-',
             ];
         }
     }
 } finally {
-    foreach (glob($tempDir . '/fresh_probe_*.php') ?: [] as $file) {
+    foreach (glob($tempDir.'/fresh_probe_*.php') ?: [] as $file) {
         @unlink($file);
     }
-    foreach (glob($tempDir . '/fresh_probe_web_*.php') ?: [] as $file) {
+    foreach (glob($tempDir.'/fresh_probe_web_*.php') ?: [] as $file) {
         @unlink($file);
     }
 }
 
-echo 'Standalone Invoice Payment Route Probe' . PHP_EOL;
+echo 'Standalone Invoice Payment Route Probe'.PHP_EOL;
 printTable(['scenario', 'registered', 'total_routes', 'action', 'middleware'], $rows);
 
 $hasError = false;
@@ -380,10 +381,10 @@ foreach ($rows as $row) {
 }
 
 if ($hasError) {
-    echo 'One or more fresh-app scenarios failed during bootstrap. This indicates the probe environment still differs from normal app startup.' . PHP_EOL;
+    echo 'One or more fresh-app scenarios failed during bootstrap. This indicates the probe environment still differs from normal app startup.'.PHP_EOL;
     exit(1);
 }
 
-echo 'Current interpretation: sibling api.php blocks do not suppress the injected finance payment route.' . PHP_EOL;
-echo 'If the route disappears only when a real web.php variant is loaded, continue isolating the web-route interaction rather than the finance route definition itself.' . PHP_EOL;
+echo 'Current interpretation: sibling api.php blocks do not suppress the injected finance payment route.'.PHP_EOL;
+echo 'If the route disappears only when a real web.php variant is loaded, continue isolating the web-route interaction rather than the finance route definition itself.'.PHP_EOL;
 exit(0);

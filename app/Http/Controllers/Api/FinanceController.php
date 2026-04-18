@@ -11,10 +11,10 @@ use App\Models\MonthlyFinanceSummary;
 use App\Models\Payment;
 use App\Models\ServiceJob;
 use App\Models\User;
-use Illuminate\Http\Response;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -489,7 +489,7 @@ class FinanceController extends Controller
                 ->latest('updated_at')
                 ->get()
                 ->map(fn (ServiceJob $job): array => [
-                    'id' => 'job-' . (string) $job->id,
+                    'id' => 'job-'.(string) $job->id,
                     'service_job_id' => (string) $job->id,
                     'receipt_number' => null,
                     'amount_iqd' => (int) round((float) ($job->payment_received_iqd ?? 0)),
@@ -514,8 +514,8 @@ class FinanceController extends Controller
             ->latest('recorded_at')
             ->get()
             ->map(fn (InvoicePayment $payment): array => [
-                'id' => 'invoice-payment-' . (string) $payment->id,
-                'service_job_id' => 'invoice-' . (string) $payment->invoice_id,
+                'id' => 'invoice-payment-'.(string) $payment->id,
+                'service_job_id' => 'invoice-'.(string) $payment->invoice_id,
                 'receipt_number' => $payment->receipt_number,
                 'amount_iqd' => (int) round((float) $payment->amount_iqd),
                 'payment_method' => $payment->method,
@@ -683,7 +683,7 @@ class FinanceController extends Controller
             'recorded_at' => $payment->recorded_at?->toIso8601String(),
         ])->concat(
             $invoicePayments->map(fn (InvoicePayment $payment): array => [
-                'id' => 'invoice-payment-' . (string) $payment->id,
+                'id' => 'invoice-payment-'.(string) $payment->id,
                 'receipt_number' => $payment->receipt_number,
                 'job_code' => $payment->invoice?->invoice_number,
                 'customer_name' => $payment->invoice?->customer_name,
@@ -760,7 +760,7 @@ class FinanceController extends Controller
 
         $csv = $rows
             ->map(fn (array $row): string => collect($row)
-                ->map(fn (string $value): string => '"' . str_replace('"', '""', $value) . '"')
+                ->map(fn (string $value): string => '"'.str_replace('"', '""', $value).'"')
                 ->implode(','))
             ->implode("\n");
 
@@ -972,5 +972,4 @@ class FinanceController extends Controller
                 ->all(),
         ];
     }
-
 }

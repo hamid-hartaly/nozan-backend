@@ -1,13 +1,17 @@
 <?php
 
+use App\Http\Controllers\Api\FinanceController;
+use App\Models\ServiceJob;
+use App\Services\WhatsAppService;
+use Illuminate\Console\Command;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernelContract;
 use Illuminate\Contracts\Debug\ExceptionHandler as ExceptionHandlerContract;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Application;
-use App\Services\WhatsAppService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Route;
 
@@ -16,7 +20,7 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Artisan::command('whatsapp:test {phone?} {name?}', function (?string $phone = null, ?string $name = null) {
-    $service = new WhatsAppService();
+    $service = new WhatsAppService;
     $diagnostics = $service->configDiagnostics();
 
     if (! $service->isConfigured()) {
@@ -24,6 +28,7 @@ Artisan::command('whatsapp:test {phone?} {name?}', function (?string $phone = nu
         if (! empty($diagnostics['hint'])) {
             $this->warn((string) $diagnostics['hint']);
         }
+
         return 1;
     }
 
@@ -32,6 +37,7 @@ Artisan::command('whatsapp:test {phone?} {name?}', function (?string $phone = nu
 
     if ($targetPhone === '') {
         $this->error('No target phone number provided.');
+
         return 1;
     }
 
@@ -39,10 +45,12 @@ Artisan::command('whatsapp:test {phone?} {name?}', function (?string $phone = nu
 
     if (! $sent) {
         $this->error('WhatsApp test message failed. Check storage/logs/laravel.log for details.');
+
         return 1;
     }
 
     $this->info("WhatsApp test message sent to {$targetPhone}.");
+
     return 0;
 })->purpose('Send a WhatsApp test message using current backend credentials');
 
@@ -59,21 +67,21 @@ Artisan::command('route:diagnose-invoice-payment', function () {
     $apiWrapperContents = file_exists($apiWrapperFile) ? (string) file_get_contents($apiWrapperFile) : '';
     $webContents = file_exists($webFile) ? (string) file_get_contents($webFile) : '';
 
-    $apiContainsRoute = str_contains($apiContents, "finance/invoices/{invoice}/payments")
-        || str_contains($apiContents, "finance/invoices/{invoiceId}/payments")
-        || str_contains($apiContents, "/invoices/{invoiceId}/payments");
-    $apiWrapperContainsRoute = str_contains($apiWrapperContents, "finance/invoices/{invoice}/payments")
-        || str_contains($apiWrapperContents, "finance/invoices/{invoiceId}/payments")
-        || str_contains($apiWrapperContents, "/invoices/{invoiceId}/payments");
-    $webContainsRoute = str_contains($webContents, "api/finance/invoices/{invoice}/payments")
-        || str_contains($webContents, "api/finance/invoices/{invoiceId}/payments");
+    $apiContainsRoute = str_contains($apiContents, 'finance/invoices/{invoice}/payments')
+        || str_contains($apiContents, 'finance/invoices/{invoiceId}/payments')
+        || str_contains($apiContents, '/invoices/{invoiceId}/payments');
+    $apiWrapperContainsRoute = str_contains($apiWrapperContents, 'finance/invoices/{invoice}/payments')
+        || str_contains($apiWrapperContents, 'finance/invoices/{invoiceId}/payments')
+        || str_contains($apiWrapperContents, '/invoices/{invoiceId}/payments');
+    $webContainsRoute = str_contains($webContents, 'api/finance/invoices/{invoice}/payments')
+        || str_contains($webContents, 'api/finance/invoices/{invoiceId}/payments');
 
     $this->newLine();
     $this->info('Invoice Payment Route Diagnostics');
     $this->line('Expected URI: POST api/finance/invoices/{invoiceId}/payments');
-    $this->line('api.php contains route text: ' . ($apiContainsRoute ? 'yes' : 'no'));
-    $this->line('api_with_invoice_payment.php contains route text: ' . ($apiWrapperContainsRoute ? 'yes' : 'no'));
-    $this->line('web.php contains route text: ' . ($webContainsRoute ? 'yes' : 'no'));
+    $this->line('api.php contains route text: '.($apiContainsRoute ? 'yes' : 'no'));
+    $this->line('api_with_invoice_payment.php contains route text: '.($apiWrapperContainsRoute ? 'yes' : 'no'));
+    $this->line('web.php contains route text: '.($webContainsRoute ? 'yes' : 'no'));
     $this->newLine();
 
     if ($registeredRoutes->isEmpty()) {
@@ -91,9 +99,9 @@ Artisan::command('route:diagnose-invoice-payment', function () {
         $middleware = implode(', ', $route->gatherMiddleware());
 
         $this->line('Registered route:');
-        $this->line('  URI: ' . $route->uri());
-        $this->line('  Action: ' . ltrim($route->getActionName(), '\\'));
-        $this->line('  Middleware: ' . ($middleware !== '' ? $middleware : '(none)'));
+        $this->line('  URI: '.$route->uri());
+        $this->line('  Action: '.ltrim($route->getActionName(), '\\'));
+        $this->line('  Middleware: '.($middleware !== '' ? $middleware : '(none)'));
         $this->newLine();
     }
 
@@ -156,7 +164,7 @@ Artisan::command('route:diagnose-api-registration-matrix', function () {
     $webContents = (string) file_get_contents(base_path('routes/web.php'));
     $routes = collect(Route::getRoutes()->getRoutes());
 
-    $combinedApiContents = $apiContents . PHP_EOL . $apiWrapperContents;
+    $combinedApiContents = $apiContents.PHP_EOL.$apiWrapperContents;
 
     $rows = collect($targets)->map(function (array $target) use ($combinedApiContents, $routes, $webContents): array {
         $route = $routes->first(fn ($candidate) => in_array($target['method'], $candidate->methods(), true)
@@ -267,7 +275,7 @@ Artisan::command('route:probe-invoice-payment-shapes', function () {
             'define' => static function (Router $router): void {
                 $router->middleware('auth:sanctum')->group(function () use ($router): void {
                     $router->group(['prefix' => 'finance'], function () use ($router): void {
-                        $router->post('/invoices/{invoiceId}/payments', [\App\Http\Controllers\Api\FinanceController::class, 'recordInvoicePayment']);
+                        $router->post('/invoices/{invoiceId}/payments', [FinanceController::class, 'recordInvoicePayment']);
                     });
                 });
             },
@@ -278,11 +286,11 @@ Artisan::command('route:probe-invoice-payment-shapes', function () {
             'define' => static function (Router $router): void {
                 $router->middleware('auth:sanctum')->group(function () use ($router): void {
                     $router->group(['prefix' => 'finance'], function () use ($router): void {
-                        $router->get('/dashboard', [\App\Http\Controllers\Api\FinanceController::class, 'dashboard']);
-                        $router->get('/invoices', [\App\Http\Controllers\Api\FinanceController::class, 'invoices']);
-                        $router->post('/invoices', [\App\Http\Controllers\Api\FinanceController::class, 'storeInvoice']);
-                        $router->post('/invoices/{invoiceId}/payments', [\App\Http\Controllers\Api\FinanceController::class, 'recordInvoicePayment']);
-                        $router->get('/payments', [\App\Http\Controllers\Api\FinanceController::class, 'payments']);
+                        $router->get('/dashboard', [FinanceController::class, 'dashboard']);
+                        $router->get('/invoices', [FinanceController::class, 'invoices']);
+                        $router->post('/invoices', [FinanceController::class, 'storeInvoice']);
+                        $router->post('/invoices/{invoiceId}/payments', [FinanceController::class, 'recordInvoicePayment']);
+                        $router->get('/payments', [FinanceController::class, 'payments']);
                     });
                 });
             },
@@ -332,7 +340,7 @@ Artisan::command('route:probe-route-file-loading', function () {
     }
 
     $writeProbeFile = static function (string $name, string $contents) use ($tempDir): string {
-        $path = $tempDir . DIRECTORY_SEPARATOR . $name;
+        $path = $tempDir.DIRECTORY_SEPARATOR.$name;
         file_put_contents($path, $contents);
 
         return $path;
@@ -460,7 +468,7 @@ PHP,
             $this->warn('File-based route loading also registers these probes correctly. The failure is likely specific to this app\'s real routes/api.php context.');
         }
     } finally {
-        foreach (glob($tempDir . DIRECTORY_SEPARATOR . 'probe_*.php') ?: [] as $file) {
+        foreach (glob($tempDir.DIRECTORY_SEPARATOR.'probe_*.php') ?: [] as $file) {
             @unlink($file);
         }
     }
@@ -515,7 +523,7 @@ PHP,
 
     try {
         foreach ($scenarios as $index => $scenario) {
-            $apiPath = $tempDir . DIRECTORY_SEPARATOR . sprintf('fresh_api_probe_%02d.php', $index + 1);
+            $apiPath = $tempDir.DIRECTORY_SEPARATOR.sprintf('fresh_api_probe_%02d.php', $index + 1);
             file_put_contents($apiPath, $scenario['contents']);
 
             try {
@@ -528,7 +536,7 @@ PHP,
                     )
                     ->create();
 
-                $freshApp->instance('files', new Filesystem());
+                $freshApp->instance('files', new Filesystem);
                 $freshApp->instance(ExceptionHandlerContract::class, app(ExceptionHandlerContract::class));
 
                 $freshApp->make(ConsoleKernelContract::class)->bootstrap();
@@ -551,7 +559,7 @@ PHP,
                     'scenario' => $scenario['label'],
                     'registered' => 'error',
                     'total_routes' => '-',
-                    'action' => class_basename($exception) . ': ' . $exception->getMessage(),
+                    'action' => class_basename($exception).': '.$exception->getMessage(),
                     'middleware' => '-',
                 ];
             }
@@ -561,7 +569,7 @@ PHP,
         $this->info('Fresh App Routing Probes');
         $this->table(['scenario', 'registered', 'total_routes', 'action', 'middleware'], $rows);
     } finally {
-        foreach (glob($tempDir . DIRECTORY_SEPARATOR . 'fresh_api_probe_*.php') ?: [] as $file) {
+        foreach (glob($tempDir.DIRECTORY_SEPARATOR.'fresh_api_probe_*.php') ?: [] as $file) {
             @unlink($file);
         }
     }
@@ -570,15 +578,15 @@ PHP,
 })->purpose('Probe invoice payment registration through a freshly booted Laravel app with temporary api route files');
 
 Artisan::command('jobs:promise-reminders {--dry-run : List affected jobs without sending WhatsApp messages} {--window=1 : Number of days ahead to include (1 = today+tomorrow)}', function () {
-    /** @var \Illuminate\Console\Command $this */
-    $service = new WhatsAppService();
+    /** @var Command $this */
+    $service = new WhatsAppService;
     $isDryRun = (bool) $this->option('dry-run');
     $window = max(0, (int) $this->option('window'));
 
-    $today = \Illuminate\Support\Carbon::today();
+    $today = Carbon::today();
     $until = $today->copy()->addDays($window)->endOfDay();
 
-    $dueJobs = \App\Models\ServiceJob::query()
+    $dueJobs = ServiceJob::query()
         ->whereNotNull('promised_completion_at')
         ->whereDate('promised_completion_at', '>=', $today->toDateString())
         ->where('promised_completion_at', '<=', $until)
@@ -587,7 +595,7 @@ Artisan::command('jobs:promise-reminders {--dry-run : List affected jobs without
         ->orderBy('promised_completion_at')
         ->get();
 
-    $overdueJobs = \App\Models\ServiceJob::query()
+    $overdueJobs = ServiceJob::query()
         ->whereNotNull('promised_completion_at')
         ->where('promised_completion_at', '<', $today)
         ->whereIn('status', ['PENDING', 'REPAIR'])
@@ -599,14 +607,16 @@ Artisan::command('jobs:promise-reminders {--dry-run : List affected jobs without
 
     if ($allJobs->isEmpty()) {
         $this->info('No promise-date jobs found in the current window.');
+
         return 0;
     }
 
     $this->table(
         ['job_code', 'customer', 'model', 'status', 'promise_date', 'overdue'],
-        $allJobs->map(function (\App\Models\ServiceJob $job) use ($today): array {
+        $allJobs->map(function (ServiceJob $job) use ($today): array {
             $promiseDate = $job->promised_completion_at?->format('Y-m-d') ?? '-';
             $isOverdue = $job->promised_completion_at && $job->promised_completion_at->lt($today);
+
             return [
                 (string) $job->job_code,
                 (string) ($job->customer_name ?? ''),
@@ -620,11 +630,13 @@ Artisan::command('jobs:promise-reminders {--dry-run : List affected jobs without
 
     if ($isDryRun) {
         $this->warn("Dry run: {$allJobs->count()} job(s) would receive a WhatsApp reminder. Run without --dry-run to send.");
+
         return 0;
     }
 
     if (! $service->isConfigured()) {
         $this->error('WhatsApp is not configured. Use --dry-run to preview without sending.');
+
         return 1;
     }
 

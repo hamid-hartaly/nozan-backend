@@ -1,15 +1,15 @@
 <?php
 
+use App\Http\Controllers\Api\AdminManagementController;
+use App\Http\Controllers\Api\AppConfigController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BookingController;
-use App\Http\Controllers\Api\JobController;
-use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\CustomerController;
-use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\FinanceController;
 use App\Http\Controllers\Api\InventoryController;
-use App\Http\Controllers\Api\AppConfigController;
-use App\Http\Controllers\Api\AdminManagementController;
+use App\Http\Controllers\Api\JobController;
+use App\Http\Controllers\Api\PaymentController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', static fn () => response()->json([
@@ -49,7 +49,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{job}/notes', [JobController::class, 'updateNotes']);
         Route::post('/{job}/whatsapp-sent', [JobController::class, 'markWhatsappSent']);
         Route::post('/{job}/images', [JobController::class, 'uploadImage']);
-                Route::post('/{job}/return', [JobController::class, 'createReturnJob']);
+        Route::post('/{job}/return', [JobController::class, 'createReturnJob']);
         Route::post('/{job}/payments', [PaymentController::class, 'store']);
     });
 
@@ -89,7 +89,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::put('/management/sections', [AdminManagementController::class, 'updateSections']);
         Route::put('/management/intake-form', [AdminManagementController::class, 'updateIntakeForm']);
-                Route::get('/whatsapp-status', [AdminManagementController::class, 'whatsappStatus']);
+        Route::get('/whatsapp-status', [AdminManagementController::class, 'whatsappStatus']);
         Route::post('/whatsapp-test', [AdminManagementController::class, 'whatsappTest']);
 
         Route::prefix('bookings')->group(function () {
@@ -101,6 +101,3 @@ Route::middleware('auth:sanctum')->group(function () {
         });
     });
 });
-
-
-

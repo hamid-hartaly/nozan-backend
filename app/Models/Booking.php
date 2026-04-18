@@ -61,4 +61,3 @@ class Booking extends Model
         return $this->status === 'rejected';
     }
 }
-

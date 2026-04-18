@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\ServiceJob;
-use App\Models\Payment;
 use App\Models\InventoryItem;
+use App\Models\Payment;
+use App\Models\ServiceJob;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -66,6 +66,7 @@ class DashboardController extends Controller
             ->sum(function (ServiceJob $job): float {
                 $totalPrice = (float) ($job->final_price_iqd ?: $job->estimated_price_iqd ?: 0);
                 $paid = (float) ($job->payment_received_iqd ?: 0);
+
                 return max(0, $totalPrice - $paid);
             });
 
@@ -93,12 +94,12 @@ class DashboardController extends Controller
             ->groupBy('assigned_staff_uid')
             ->map(function ($jobs) {
                 $staffMember = $jobs->first()?->assignedStaff;
+
                 return [
                     'technician_uid' => $jobs->first()?->assigned_staff_uid,
                     'technician_name' => $staffMember?->name ?? 'Unassigned',
                     'jobs_completed' => $jobs->count(),
-                    'revenue_generated_iqd' => (float) $jobs->sum(fn (ServiceJob $job) =>
-                        Payment::where('service_job_id', $job->id)->sum('amount_iqd')
+                    'revenue_generated_iqd' => (float) $jobs->sum(fn (ServiceJob $job) => Payment::where('service_job_id', $job->id)->sum('amount_iqd')
                     ),
                 ];
             })

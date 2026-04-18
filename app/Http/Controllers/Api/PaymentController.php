@@ -48,7 +48,7 @@ class PaymentController extends Controller
         }
 
         // Send WhatsApp notification for payment recorded
-        $whatsappService = new WhatsAppService();
+        $whatsappService = new WhatsAppService;
         $whatsappService->sendPaymentRecordedMessage($job, (int) round((float) $payload['amount_iqd']));
 
         return response()->json([

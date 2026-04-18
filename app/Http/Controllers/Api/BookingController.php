@@ -73,7 +73,7 @@ class BookingController extends Controller
             'status' => 'pending',
         ]);
 
-        $whatsappService = new WhatsAppService();
+        $whatsappService = new WhatsAppService;
         $whatsappService->sendBookingSubmittedMessage($booking->phone, $booking->name);
 
         return response()->json([
@@ -155,8 +155,8 @@ class BookingController extends Controller
 
             $notes = array_filter([
                 $payload['notes'] ?? null,
-                $booking->notes ? 'Booking notes: ' . $booking->notes : null,
-                'Customer address: ' . $booking->address,
+                $booking->notes ? 'Booking notes: '.$booking->notes : null,
+                'Customer address: '.$booking->address,
             ]);
 
             $job = ServiceJob::create([
@@ -192,7 +192,7 @@ class BookingController extends Controller
             $booking->notes = $payload['notes'] ?? $booking->notes;
             $booking->save();
 
-            $whatsappService = new WhatsAppService();
+            $whatsappService = new WhatsAppService;
             if ($whatsappService->sendJobCreatedMessage($job)) {
                 $job->update(['whatsapp_created_sent' => true]);
             }
@@ -235,7 +235,7 @@ class BookingController extends Controller
             'description' => $booking->description,
             'address' => $booking->address,
             'image_path' => $booking->image_path,
-            'image_url' => $booking->image_path ? asset('storage/' . ltrim($booking->image_path, '/')) : null,
+            'image_url' => $booking->image_path ? asset('storage/'.ltrim($booking->image_path, '/')) : null,
             'status' => $booking->status,
             'converted_at' => $booking->converted_at?->toIso8601String(),
             'converted_job_code' => $booking->converted_job_code,
@@ -257,4 +257,3 @@ class BookingController extends Controller
         ];
     }
 }
-

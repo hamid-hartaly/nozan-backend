@@ -247,7 +247,7 @@ class JobController extends Controller
         ]);
 
         // Send WhatsApp notification for new job
-        $whatsappService = new WhatsAppService();
+        $whatsappService = new WhatsAppService;
         if ($whatsappService->sendJobCreatedMessage($job)) {
             $job->update([
                 'whatsapp_sent' => true,
@@ -446,22 +446,22 @@ class JobController extends Controller
         $job->save();
 
         // Send WhatsApp notifications based on status change
-        $whatsappService = new WhatsAppService();
-        if ($job->status === 'REPAIR' && !$job->whatsapp_repair_started_sent && $whatsappService->sendRepairStartedMessage($job)) {
+        $whatsappService = new WhatsAppService;
+        if ($job->status === 'REPAIR' && ! $job->whatsapp_repair_started_sent && $whatsappService->sendRepairStartedMessage($job)) {
             $job->update([
                 'whatsapp_sent' => true,
                 'whatsapp_repair_started_sent' => true,
             ]);
         }
 
-        if ($job->status === 'FINISHED' && !$job->whatsapp_finished_sent && $whatsappService->sendJobFinishedMessage($job)) {
+        if ($job->status === 'FINISHED' && ! $job->whatsapp_finished_sent && $whatsappService->sendJobFinishedMessage($job)) {
             $job->update([
                 'whatsapp_sent' => true,
                 'whatsapp_finished_sent' => true,
             ]);
         }
 
-        if (in_array($job->status, ['OUT', 'CHECKED_OUT'], true) && !$job->whatsapp_pickup_sent && $whatsappService->sendReadyForPickupMessage($job)) {
+        if (in_array($job->status, ['OUT', 'CHECKED_OUT'], true) && ! $job->whatsapp_pickup_sent && $whatsappService->sendReadyForPickupMessage($job)) {
             $job->update([
                 'whatsapp_sent' => true,
                 'whatsapp_pickup_sent' => true,
@@ -577,7 +577,7 @@ class JobController extends Controller
             'received_at' => now(),
         ]);
 
-        $whatsappService = new WhatsAppService();
+        $whatsappService = new WhatsAppService;
         if ($whatsappService->sendJobCreatedMessage($returnJob)) {
             $returnJob->update([
                 'whatsapp_sent' => true,
@@ -685,7 +685,7 @@ class JobController extends Controller
                 ->map(fn (JobImage $image): array => [
                     'id' => (string) $image->id,
                     'path' => $image->image_path,
-                    'url' => asset('storage/' . ltrim((string) $image->image_path, '/')),
+                    'url' => asset('storage/'.ltrim((string) $image->image_path, '/')),
                     'label' => $image->label,
                     'created_at' => $image->created_at?->toIso8601String(),
                 ])
