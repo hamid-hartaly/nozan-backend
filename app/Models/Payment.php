@@ -27,6 +27,7 @@ class Payment extends Model
 
     protected $fillable = [
         'service_job_id',
+        'invoice_payment_id',
         'amount_iqd',
         'method',
         'reference',
@@ -64,5 +65,10 @@ class Payment extends Model
     public function serviceJob(): BelongsTo
     {
         return $this->belongsTo(ServiceJob::class, 'service_job_id');
+    }
+
+    public function invoicePayment(): BelongsTo
+    {
+        return $this->belongsTo(InvoicePayment::class);
     }
 }

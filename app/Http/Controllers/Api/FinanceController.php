@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -31,21 +32,18 @@ class FinanceController extends Controller
         $monthEnd = $today->copy()->endOfMonth();
         $lastMonthStart = $today->copy()->subMonthNoOverflow()->startOfMonth();
 
+        $todayResidualInvoicePayments = $this->invoicePaymentResidualEntries($todayStart, $todayEnd);
+        $monthResidualInvoicePayments = $this->invoicePaymentResidualEntries($monthStart, $monthEnd);
+
         $revenueToday = (int) round((float) Payment::query()
             ->whereBetween('recorded_at', [$todayStart, $todayEnd])
             ->sum('amount_iqd'))
-            + (int) round((float) InvoicePayment::query()
-                ->whereDoesntHave('invoice.serviceJobs')
-                ->whereBetween('recorded_at', [$todayStart, $todayEnd])
-                ->sum('amount_iqd'));
+            + (int) $todayResidualInvoicePayments->sum('amount_iqd');
 
         $revenueThisMonth = (int) round((float) Payment::query()
             ->whereBetween('recorded_at', [$monthStart, $monthEnd])
             ->sum('amount_iqd'))
-            + (int) round((float) InvoicePayment::query()
-                ->whereDoesntHave('invoice.serviceJobs')
-                ->whereBetween('recorded_at', [$monthStart, $monthEnd])
-                ->sum('amount_iqd'));
+            + (int) $monthResidualInvoicePayments->sum('amount_iqd');
 
         $expensesThisMonth = (int) round((float) Expense::query()
             ->whereBetween('expense_date', [$monthStart->toDateString(), $monthEnd->toDateString()])
@@ -64,7 +62,7 @@ class FinanceController extends Controller
         $todayPaymentsCount = Payment::query()
             ->whereBetween('recorded_at', [$todayStart, $todayEnd])
             ->count()
-            + InvoicePayment::query()->whereBetween('recorded_at', [$todayStart, $todayEnd])->count();
+            + $todayResidualInvoicePayments->count();
 
         $todayExpensesCount = Expense::query()
             ->whereDate('expense_date', $today->toDateString())
@@ -381,9 +379,9 @@ class FinanceController extends Controller
         $amount = (int) round((float) $payload['amount_iqd']);
         abort_if($amount > (int) round((float) $invoiceModel->outstanding_iqd), 422, 'Payment cannot exceed invoice outstanding balance.');
 
-        $payment = DB::transaction(function () use ($invoiceModel, $payload, $amount): InvoicePayment {
-            $invoiceModel->loadMissing('serviceJobs');
+        $invoiceModel->loadMissing(['serviceJobs', 'lineItems']);
 
+        $payment = DB::transaction(function () use ($invoiceModel, $payload, $amount): InvoicePayment {
             $payment = InvoicePayment::create([
                 'invoice_id' => $invoiceModel->id,
                 'amount_iqd' => $amount,
@@ -410,6 +408,7 @@ class FinanceController extends Controller
 
                 Payment::create([
                     'service_job_id' => $job->id,
+                    'invoice_payment_id' => $payment->id,
                     'amount_iqd' => $allocated,
                     'method' => $payload['method'] ?? 'cash',
                     'reference' => $payload['reference'] ?? null,
@@ -508,27 +507,7 @@ class FinanceController extends Controller
                 ]);
         }
 
-        $invoicePayments = InvoicePayment::query()
-            ->whereDoesntHave('invoice.serviceJobs')
-            ->with('invoice:id,invoice_number,customer_name,customer_phone,tv_model,total_iqd,paid_iqd,outstanding_iqd,status')
-            ->latest('recorded_at')
-            ->get()
-            ->map(fn (InvoicePayment $payment): array => [
-                'id' => 'invoice-payment-'.(string) $payment->id,
-                'service_job_id' => 'invoice-'.(string) $payment->invoice_id,
-                'receipt_number' => $payment->receipt_number,
-                'amount_iqd' => (int) round((float) $payment->amount_iqd),
-                'payment_method' => $payment->method,
-                'note' => $payment->notes,
-                'recorded_by' => $payment->recorded_by,
-                'recorded_at' => $payment->recorded_at?->toIso8601String(),
-                'job_code' => $payment->invoice?->invoice_number,
-                'customer_name' => $payment->invoice?->customer_name,
-                'job_status' => 'CHECKED_OUT',
-                'remaining_iqd' => (int) round((float) ($payment->invoice?->outstanding_iqd ?? 0)),
-                'tv_model' => $payment->invoice?->tv_model ?: 'Invoice payment',
-                'status' => (float) ($payment->invoice?->outstanding_iqd ?? 0) <= 0 ? 'CLEARED' : 'PARTIAL',
-            ]);
+        $invoicePayments = $this->invoicePaymentResidualEntries();
 
         $allPayments = $payments->concat($invoicePayments)->sortByDesc(fn (array $payment) => $payment['recorded_at'] ?? '')->values();
 
@@ -665,12 +644,7 @@ class FinanceController extends Controller
             ->orderByDesc('recorded_at')
             ->get();
 
-        $invoicePayments = InvoicePayment::query()
-            ->whereDoesntHave('invoice.serviceJobs')
-            ->with('invoice:id,invoice_number,customer_name')
-            ->whereBetween('recorded_at', [$start, $end])
-            ->orderByDesc('recorded_at')
-            ->get();
+        $invoicePayments = $this->invoicePaymentResidualEntries($start, $end);
 
         $combinedPayments = $payments->map(fn (Payment $payment): array => [
             'id' => (string) $payment->id,
@@ -682,15 +656,15 @@ class FinanceController extends Controller
             'recorded_by' => $payment->recorded_by,
             'recorded_at' => $payment->recorded_at?->toIso8601String(),
         ])->concat(
-            $invoicePayments->map(fn (InvoicePayment $payment): array => [
-                'id' => 'invoice-payment-'.(string) $payment->id,
-                'receipt_number' => $payment->receipt_number,
-                'job_code' => $payment->invoice?->invoice_number,
-                'customer_name' => $payment->invoice?->customer_name,
-                'amount_iqd' => (int) round((float) $payment->amount_iqd),
-                'method' => $payment->method,
-                'recorded_by' => $payment->recorded_by,
-                'recorded_at' => $payment->recorded_at?->toIso8601String(),
+            $invoicePayments->map(fn (array $payment): array => [
+                'id' => $payment['id'],
+                'receipt_number' => $payment['receipt_number'],
+                'job_code' => $payment['job_code'],
+                'customer_name' => $payment['customer_name'],
+                'amount_iqd' => $payment['amount_iqd'],
+                'method' => $payment['payment_method'],
+                'recorded_by' => $payment['recorded_by'],
+                'recorded_at' => $payment['recorded_at'],
             ])
         )->sortByDesc(fn (array $payment) => $payment['recorded_at'] ?? '')->values();
 
@@ -723,12 +697,7 @@ class FinanceController extends Controller
             ->orderBy('recorded_at')
             ->get();
 
-        $invoicePayments = InvoicePayment::query()
-            ->whereDoesntHave('invoice.serviceJobs')
-            ->with('invoice:id,invoice_number,customer_name')
-            ->whereBetween('recorded_at', [$start, $end])
-            ->orderBy('recorded_at')
-            ->get();
+        $invoicePayments = $this->invoicePaymentResidualEntries($start, $end)->sortBy('recorded_at')->values();
 
         $rows = collect([
             ['Date', 'Receipt', 'Job Code', 'Customer', 'TV Model', 'Amount IQD', 'Method', 'Recorded By', 'Reference'],
@@ -745,16 +714,16 @@ class FinanceController extends Controller
                 (string) ($payment->reference ?? ''),
             ])
         )->concat(
-            $invoicePayments->map(fn (InvoicePayment $payment): array => [
-                (string) ($payment->recorded_at?->toDateString() ?? ''),
-                (string) ($payment->receipt_number ?? ''),
-                (string) ($payment->invoice?->invoice_number ?? ''),
-                (string) ($payment->invoice?->customer_name ?? ''),
-                'Invoice payment',
-                (string) ((int) round((float) $payment->amount_iqd)),
-                (string) $payment->method,
-                (string) ($payment->recorded_by ?? ''),
-                (string) ($payment->reference ?? ''),
+            $invoicePayments->map(fn (array $payment): array => [
+                (string) (filled($payment['recorded_at']) ? Carbon::parse((string) $payment['recorded_at'])->toDateString() : ''),
+                (string) ($payment['receipt_number'] ?? ''),
+                (string) ($payment['job_code'] ?? ''),
+                (string) ($payment['customer_name'] ?? ''),
+                (string) ($payment['tv_model'] ?? 'Invoice payment'),
+                (string) ((int) ($payment['amount_iqd'] ?? 0)),
+                (string) ($payment['payment_method'] ?? ''),
+                (string) ($payment['recorded_by'] ?? ''),
+                (string) ($payment['reference'] ?? ''),
             ])
         );
 
@@ -854,6 +823,60 @@ class FinanceController extends Controller
     }
 
     /**
+     * @return Collection<int, array<string, int|string|null>>
+     */
+    private function invoicePaymentResidualEntries(?Carbon $start = null, ?Carbon $end = null): Collection
+    {
+        return InvoicePayment::query()
+            ->with([
+                'invoice:id,invoice_number,customer_name,outstanding_iqd,status',
+                'invoice.serviceJobs:id,job_code',
+                'allocatedPayments:id,invoice_payment_id,amount_iqd',
+            ])
+            ->when($start && $end, fn ($query) => $query->whereBetween('recorded_at', [$start, $end]))
+            ->latest('recorded_at')
+            ->get()
+            ->map(function (InvoicePayment $payment): ?array {
+                $invoice = $payment->invoice;
+                if (! $invoice instanceof Invoice) {
+                    return null;
+                }
+
+                $amount = (int) round((float) $payment->amount_iqd);
+                $allocatedAmount = (int) round((float) $payment->allocatedPayments->sum('amount_iqd'));
+                $hasJobLinks = $invoice->serviceJobs->isNotEmpty();
+
+                $residualAmount = $hasJobLinks
+                    ? ($allocatedAmount > 0 ? max($amount - $allocatedAmount, 0) : 0)
+                    : $amount;
+
+                if ($residualAmount <= 0) {
+                    return null;
+                }
+
+                return [
+                    'id' => 'invoice-payment-'.(string) $payment->id,
+                    'service_job_id' => 'invoice-'.(string) $payment->invoice_id,
+                    'receipt_number' => $payment->receipt_number,
+                    'amount_iqd' => $residualAmount,
+                    'payment_method' => $payment->method,
+                    'note' => $payment->notes,
+                    'recorded_by' => $payment->recorded_by,
+                    'recorded_at' => $payment->recorded_at?->toIso8601String(),
+                    'job_code' => $invoice->invoice_number,
+                    'customer_name' => $invoice->customer_name,
+                    'job_status' => 'CHECKED_OUT',
+                    'remaining_iqd' => (int) round((float) $invoice->outstanding_iqd),
+                    'tv_model' => $hasJobLinks ? 'Invoice extras' : 'Invoice payment',
+                    'status' => (float) $invoice->outstanding_iqd <= 0 ? 'CLEARED' : 'PARTIAL',
+                    'reference' => $payment->reference,
+                ];
+            })
+            ->filter()
+            ->values();
+    }
+
+    /**
      * @return array<string, int|bool>
      */
     private function computeMonthlySummary(Carbon $monthStart): array
@@ -864,10 +887,7 @@ class FinanceController extends Controller
         $revenue = (int) round((float) Payment::query()
             ->whereBetween('recorded_at', [$start, $end])
             ->sum('amount_iqd'))
-            + (int) round((float) InvoicePayment::query()
-                ->whereDoesntHave('invoice.serviceJobs')
-                ->whereBetween('recorded_at', [$start, $end])
-                ->sum('amount_iqd'));
+            + (int) $this->invoicePaymentResidualEntries($start, $end)->sum('amount_iqd');
 
         $expenses = (int) round((float) Expense::query()
             ->whereBetween('expense_date', [$start->toDateString(), $end->toDateString()])
