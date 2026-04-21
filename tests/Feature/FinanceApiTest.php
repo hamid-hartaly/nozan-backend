@@ -296,5 +296,22 @@ class FinanceApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('dashboard.total_revenue_today_iqd', 35000)
             ->assertJsonPath('dashboard.total_revenue_this_month_iqd', 35000);
+
+        $this->getJson('/api/finance/daily-close')
+            ->assertOk()
+            ->assertJsonPath('summary.total_received_iqd', 35000)
+            ->assertJsonPath('summary.payments_count', 3)
+            ->assertJsonFragment([
+                'job_code' => $invoiceNumber,
+                'amount_iqd' => 5000,
+            ]);
+
+        $csvResponse = $this->get('/api/finance/monthly-csv');
+        $csvResponse->assertOk();
+
+        $csv = $csvResponse->getContent();
+        $this->assertIsString($csv);
+        $this->assertStringContainsString('"'.$invoiceNumber.'"', $csv);
+        $this->assertStringContainsString('"5000"', $csv);
     }
 }
