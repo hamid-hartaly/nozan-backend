@@ -314,4 +314,62 @@ class FinanceApiTest extends TestCase
         $this->assertStringContainsString('"'.$invoiceNumber.'"', $csv);
         $this->assertStringContainsString('"5000"', $csv);
     }
+
+    public function test_job_linked_invoice_payment_without_job_allocation_is_counted_as_residual(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $job = ServiceJob::query()->create([
+            'job_code' => 'NGS-260423-0200',
+            'customer_id' => 'customer-260423-0200',
+            'customer_name' => 'Hawkar Majid',
+            'customer_phone' => '+964 770 222 4545',
+            'tv_model' => 'Samsung 50"',
+            'category' => 'LED',
+            'issue' => 'Main board issue',
+            'priority' => 'normal',
+            'status' => 'FINISHED',
+            'final_price_iqd' => 30000,
+            'payment_received_iqd' => 30000,
+            'created_by_user_id' => $admin->id,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $invoiceResponse = $this->postJson('/api/finance/invoices', [
+            'service_job_ids' => [$job->id],
+            'extra_items' => [
+                [
+                    'description' => 'Remote replacement',
+                    'quantity' => 1,
+                    'unit_price_iqd' => 10000,
+                ],
+            ],
+        ])->assertCreated();
+
+        $invoiceNumber = (string) $invoiceResponse->json('invoice.invoice_number');
+        $invoiceId = (string) Invoice::query()->where('invoice_number', $invoiceNumber)->value('id');
+
+        $this->postJson("/api/finance/invoices/{$invoiceId}/payments", [
+            'amount_iqd' => 5000,
+            'method' => 'cash',
+        ])->assertOk();
+
+        $this->assertDatabaseMissing('payments', [
+            'invoice_payment_id' => 1,
+        ]);
+
+        $this->getJson('/api/finance/payments')
+            ->assertOk()
+            ->assertJsonPath('summary.received_iqd', 35000)
+            ->assertJsonFragment([
+                'job_code' => $invoiceNumber,
+                'amount_iqd' => 5000,
+            ]);
+
+        $this->getJson('/api/finance/dashboard')
+            ->assertOk()
+            ->assertJsonPath('dashboard.total_revenue_today_iqd', 5000)
+            ->assertJsonPath('dashboard.total_revenue_this_month_iqd', 5000);
+    }
 }

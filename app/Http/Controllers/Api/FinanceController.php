@@ -847,7 +847,7 @@ class FinanceController extends Controller
                 $hasJobLinks = $invoice->serviceJobs->isNotEmpty();
 
                 $residualAmount = $hasJobLinks
-                    ? ($allocatedAmount > 0 ? max($amount - $allocatedAmount, 0) : 0)
+                    ? max($amount - $allocatedAmount, 0)
                     : $amount;
 
                 if ($residualAmount <= 0) {
