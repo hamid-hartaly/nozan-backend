@@ -377,13 +377,20 @@ class FinanceController extends Controller
         ]);
 
         $amount = (int) round((float) $payload['amount_iqd']);
-        abort_if($amount > (int) round((float) $invoiceModel->outstanding_iqd), 422, 'Payment cannot exceed invoice outstanding balance.');
-
-        $invoiceModel->loadMissing(['serviceJobs', 'lineItems']);
 
         $payment = DB::transaction(function () use ($invoiceModel, $payload, $amount): InvoicePayment {
+            /** @var Invoice $lockedInvoice */
+            $lockedInvoice = Invoice::query()
+                ->whereKey($invoiceModel->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            abort_if($amount > (int) round((float) $lockedInvoice->outstanding_iqd), 422, 'Payment cannot exceed invoice outstanding balance.');
+
+            $lockedInvoice->loadMissing(['serviceJobs', 'lineItems']);
+
             $payment = InvoicePayment::create([
-                'invoice_id' => $invoiceModel->id,
+                'invoice_id' => $lockedInvoice->id,
                 'amount_iqd' => $amount,
                 'method' => $payload['method'] ?? 'cash',
                 'reference' => $payload['reference'] ?? null,
@@ -391,7 +398,7 @@ class FinanceController extends Controller
             ]);
 
             $remainingAmount = $amount;
-            $jobs = $invoiceModel->serviceJobs()->get();
+            $jobs = $lockedInvoice->serviceJobs()->get();
 
             foreach ($jobs as $job) {
                 if ($remainingAmount <= 0) {
@@ -419,12 +426,12 @@ class FinanceController extends Controller
                 $remainingAmount -= $allocated;
             }
 
-            $invoiceModel->paid_iqd = (float) $invoiceModel->paid_iqd + $amount;
-            $invoiceModel->outstanding_iqd = max((float) $invoiceModel->total_iqd - (float) $invoiceModel->paid_iqd, 0);
-            $invoiceModel->status = $invoiceModel->outstanding_iqd <= 0
+            $lockedInvoice->paid_iqd = (float) $lockedInvoice->paid_iqd + $amount;
+            $lockedInvoice->outstanding_iqd = max((float) $lockedInvoice->total_iqd - (float) $lockedInvoice->paid_iqd, 0);
+            $lockedInvoice->status = $lockedInvoice->outstanding_iqd <= 0
                 ? 'PAID'
-                : ((float) $invoiceModel->paid_iqd > 0 ? 'PARTIAL' : 'UNPAID');
-            $invoiceModel->save();
+                : ((float) $lockedInvoice->paid_iqd > 0 ? 'PARTIAL' : 'UNPAID');
+            $lockedInvoice->save();
 
             return $payment->fresh();
         });
