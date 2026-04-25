@@ -13,6 +13,7 @@ use App\Services\WhatsAppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -589,6 +590,38 @@ class JobController extends Controller
             'message' => 'Return job created successfully.',
             'job' => $this->transformJob($returnJob->fresh(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages', 'returnedFromJob:id,job_code'])),
         ], 201);
+    }
+
+    public function destroy(Request $request, ServiceJob $job): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && in_array($user->roleEnum(), [UserRole::Admin, UserRole::Accountant], true), 403);
+
+        DB::transaction(function () use ($job): void {
+            foreach ($job->jobImages()->get() as $image) {
+                if ($image->image_path) {
+                    try {
+                        if (Storage::disk('public')->exists($image->image_path)) {
+                            Storage::disk('public')->delete($image->image_path);
+                        }
+                    } catch (\Throwable) {
+                        // Storage errors should not block job deletion
+                    }
+                }
+            }
+
+            if (Schema::hasColumn('service_jobs', 'returned_from_job_id')) {
+                $job->returnedJobs()->update(['returned_from_job_id' => null]);
+            }
+
+            $job->jobImages()->delete();
+            $job->delete();
+        });
+
+        return response()->json([
+            'message' => 'Job deleted successfully.',
+        ]);
     }
 
     public function staffOptions(): JsonResponse

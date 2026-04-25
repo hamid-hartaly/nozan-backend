@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\Customer;
@@ -16,11 +17,24 @@ use Illuminate\Validation\Rule;
 
 class BookingController extends Controller
 {
+    private function authorizeAdminOrAccountant(Request $request): void
+    {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless(
+            $user instanceof User && in_array($user->roleEnum()->value, [UserRole::Admin->value, UserRole::Accountant->value], true),
+            403,
+            'Only admin or accountant can access booking management.'
+        );
+    }
+
     /**
      * List all bookings (admin only)
      */
     public function index(Request $request): JsonResponse
     {
+        $this->authorizeAdminOrAccountant($request);
+
         $query = Booking::query();
 
         if ($status = $request->string('status')->toString()) {
@@ -85,8 +99,10 @@ class BookingController extends Controller
     /**
      * Get a single booking
      */
-    public function show(Booking $booking): JsonResponse
+    public function show(Request $request, Booking $booking): JsonResponse
     {
+        $this->authorizeAdminOrAccountant($request);
+
         return response()->json(['booking' => $this->transformBooking($booking)]);
     }
 
@@ -95,6 +111,7 @@ class BookingController extends Controller
      */
     public function update(Request $request, Booking $booking): JsonResponse
     {
+        $this->authorizeAdminOrAccountant($request);
         $payload = $request->validate([
             'status' => ['required', Rule::in(['pending', 'converted', 'rejected'])],
             'notes' => ['nullable', 'string'],
@@ -122,6 +139,8 @@ class BookingController extends Controller
      */
     public function convertToJob(Request $request, Booking $booking): JsonResponse
     {
+        $this->authorizeAdminOrAccountant($request);
+
         /** @var User $user */
         $user = $request->user();
 
@@ -210,8 +229,10 @@ class BookingController extends Controller
     /**
      * Delete a booking (admin only)
      */
-    public function destroy(Booking $booking): JsonResponse
+    public function destroy(Request $request, Booking $booking): JsonResponse
     {
+        $this->authorizeAdminOrAccountant($request);
+
         if ($booking->image_path && Storage::disk('public')->exists($booking->image_path)) {
             Storage::disk('public')->delete($booking->image_path);
         }

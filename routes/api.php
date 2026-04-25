@@ -1,16 +1,18 @@
-<?php
+﻿<?php
 
-use App\Http\Controllers\Api\AdminManagementController;
-use App\Http\Controllers\Api\AppConfigController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BookingController;
-use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\JobController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\FinanceController;
 use App\Http\Controllers\Api\InventoryController;
-use App\Http\Controllers\Api\JobController;
-use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\AppConfigController;
+use App\Http\Controllers\Api\AdminManagementController;
 use Illuminate\Support\Facades\Route;
+
+// Note: File will be fully reconstructed with all required routes below
 
 Route::get('/health', static fn () => response()->json([
     'status' => 'ok',
@@ -25,9 +27,15 @@ Route::prefix('auth')->middleware('')->group(function () {
     });
 });
 
-// Public booking endpoint - no authentication required
-Route::post('/bookings', [BookingController::class, 'store']);
+// Public endpoints - no authentication required
+Route::post('/bookings', [BookingController::class, 'store'])->middleware('throttle:public-booking');
 Route::get('/public/jobs/{job}/tracking', [JobController::class, 'publicTracking']);
+
+// Admin diagnostics endpoints
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/admin/whatsapp-status', [AdminManagementController::class, 'whatsappStatus']);
+    Route::post('/admin/whatsapp-test', [AdminManagementController::class, 'whatsappTest']);
+});
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/app-config', [AppConfigController::class, 'index']);
@@ -43,12 +51,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{job}', [JobController::class, 'show']);
         Route::put('/{job}', [JobController::class, 'update']);
         Route::delete('/{job}', [JobController::class, 'destroy']);
-        Route::post('/{job}/status', [JobController::class, 'updateStatus']);
-        Route::patch('/{job}/status', [JobController::class, 'updateStatus']);
+        Route::any('/{job}/status', [JobController::class, 'updateStatus']);
         Route::post('/{job}/assign', [JobController::class, 'assign']);
         Route::post('/{job}/notes', [JobController::class, 'updateNotes']);
         Route::post('/{job}/whatsapp-sent', [JobController::class, 'markWhatsappSent']);
         Route::post('/{job}/images', [JobController::class, 'uploadImage']);
+        Route::delete('/{job}/images/{image}', [JobController::class, 'deleteImage']);
         Route::post('/{job}/return', [JobController::class, 'createReturnJob']);
         Route::post('/{job}/payments', [PaymentController::class, 'store']);
     });
@@ -64,6 +72,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/invoices', [FinanceController::class, 'invoices']);
         Route::get('/invoice-candidates', [FinanceController::class, 'invoiceCandidates']);
         Route::post('/invoices', [FinanceController::class, 'storeInvoice']);
+        // Note: POST /invoices/{invoiceId}/payments is registered in api_with_invoice_payment.php (bootstrap workaround)
         Route::get('/payments', [FinanceController::class, 'payments']);
         Route::get('/debts', [FinanceController::class, 'debts']);
         Route::get('/expenses', [FinanceController::class, 'expenses']);
@@ -75,7 +84,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::prefix('inventory')->group(function () {
         Route::get('/', [InventoryController::class, 'index']);
+        Route::post('/', [InventoryController::class, 'store']);
         Route::get('/{item}', [InventoryController::class, 'show']);
+        Route::put('/{item}', [InventoryController::class, 'update']);
+        Route::delete('/{item}', [InventoryController::class, 'destroy']);
         Route::get('/{item}/movements', [InventoryController::class, 'movements']);
         Route::post('/{item}/movements', [InventoryController::class, 'recordMovement']);
     });
@@ -89,8 +101,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::put('/management/sections', [AdminManagementController::class, 'updateSections']);
         Route::put('/management/intake-form', [AdminManagementController::class, 'updateIntakeForm']);
-        Route::get('/whatsapp-status', [AdminManagementController::class, 'whatsappStatus']);
-        Route::post('/whatsapp-test', [AdminManagementController::class, 'whatsappTest']);
+        Route::put('/management/hidden-staff', [AdminManagementController::class, 'updateHiddenStaffIds']);
 
         Route::prefix('bookings')->group(function () {
             Route::get('/', [BookingController::class, 'index']);
