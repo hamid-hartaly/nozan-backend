@@ -220,11 +220,15 @@ class JobController extends Controller
             ? User::find($payload['assigned_staff_uid'])
             : null;
 
+        $manualCustomerName = trim((string) ($payload['customer_name'] ?? ''));
+        $manualCustomerPhone = trim((string) ($payload['customer_phone'] ?? ''));
+
         $job = ServiceJob::create([
             'customer_id' => $customer ? (string) $customer->id : null,
             'customer_record_id' => $customer?->id,
-            'customer_name' => $customer?->name ?: ($payload['customer_name'] ?: 'Unknown customer'),
-            'customer_phone' => $customer?->phone ?: ($payload['customer_phone'] ?: 'Unknown phone'),
+            // Keep a job-level snapshot; manual input takes precedence over linked customer defaults.
+            'customer_name' => $manualCustomerName !== '' ? $manualCustomerName : ($customer?->name ?: 'Unknown customer'),
+            'customer_phone' => $manualCustomerPhone !== '' ? $manualCustomerPhone : ($customer?->phone ?: 'Unknown phone'),
             'tv_model' => $payload['tv_model'],
             'device_model' => $payload['tv_model'],
             'category' => strtoupper((string) ($payload['category'] ?? 'OTHER')),
@@ -272,6 +276,8 @@ class JobController extends Controller
     public function update(Request $request, ServiceJob $job): JsonResponse
     {
         $payload = $request->validate([
+            'customer_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer_phone' => ['sometimes', 'nullable', 'string', 'max:50'],
             'tv_model' => ['sometimes', 'string', 'max:255'],
             'category' => ['sometimes', 'string', 'max:255'],
             'priority' => ['sometimes', 'string', 'max:50'],
@@ -300,6 +306,14 @@ class JobController extends Controller
         if (array_key_exists('issue', $payload)) {
             $job->issue = $payload['issue'];
             $job->problem = $payload['issue'];
+        }
+
+        if (array_key_exists('customer_name', $payload)) {
+            $job->customer_name = $payload['customer_name'] ?: 'Unknown customer';
+        }
+
+        if (array_key_exists('customer_phone', $payload)) {
+            $job->customer_phone = $payload['customer_phone'] ?: 'Unknown phone';
         }
 
         if (array_key_exists('estimated_price_iqd', $payload)) {
