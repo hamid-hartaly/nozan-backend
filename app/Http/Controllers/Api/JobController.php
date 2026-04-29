@@ -13,6 +13,8 @@ use App\Services\WhatsAppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -20,9 +22,41 @@ class JobController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canAccessJobs(), 403);
+
         $query = ServiceJob::query()
-            ->with(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages'])
-            ->latest();
+            ->with(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages', 'returnedFromJob:id,job_code']);
+
+        $filters = $request->validate([
+            'promise' => ['nullable', Rule::in(['today', 'tomorrow', 'overdue', 'all', 'none'])],
+            'promised_day' => ['nullable', 'date'],
+            'overdue_promises' => ['nullable', 'boolean'],
+            'promise_sort' => ['nullable', Rule::in(['none', 'closest_first', 'overdue_first'])],
+        ]);
+
+        $promisePreset = strtolower((string) ($filters['promise'] ?? ''));
+        $explicitPromisedDay = ! empty($filters['promised_day']);
+        $explicitOverdueFlag = $request->query('overdue_promises') !== null;
+
+        $promisedDayFilter = $explicitPromisedDay
+            ? Carbon::parse((string) $filters['promised_day'])->toDateString()
+            : null;
+
+        $overdueOnlyFilter = $explicitOverdueFlag
+            ? $request->boolean('overdue_promises')
+            : false;
+
+        if (! $explicitPromisedDay && ! $explicitOverdueFlag) {
+            if ($promisePreset === 'today') {
+                $promisedDayFilter = Carbon::today()->toDateString();
+            } elseif ($promisePreset === 'tomorrow') {
+                $promisedDayFilter = Carbon::tomorrow()->toDateString();
+            } elseif ($promisePreset === 'overdue') {
+                $overdueOnlyFilter = true;
+            }
+        }
 
         if ($search = $request->string('search')->toString()) {
             $query->where(function ($builder) use ($search): void {
@@ -50,9 +84,48 @@ class JobController extends Controller
             $query->where('assigned_staff_uid', $technician);
         }
 
-        $jobs = $query->paginate($request->integer('per_page', 20));
+        if ($promisedDayFilter !== null) {
+            $query->whereDate('promised_completion_at', $promisedDayFilter);
+        }
 
-        return response()->json($jobs->through(fn (ServiceJob $job): array => $this->transformJob($job)));
+        if ($overdueOnlyFilter) {
+            $query
+                ->whereNotNull('promised_completion_at')
+                ->where('promised_completion_at', '<', Carbon::now())
+                ->whereIn('status', ['PENDING', 'REPAIR']);
+        }
+
+        $promiseSort = $filters['promise_sort'] ?? 'none';
+
+        if ($promiseSort === 'closest_first') {
+            $query
+                ->orderByRaw('CASE WHEN promised_completion_at IS NULL THEN 1 ELSE 0 END ASC')
+                ->orderBy('promised_completion_at')
+                ->latest();
+        } elseif ($promiseSort === 'overdue_first') {
+            $query
+                ->orderByRaw(
+                    "CASE WHEN promised_completion_at IS NOT NULL AND promised_completion_at < ? AND status IN ('PENDING','REPAIR') THEN 0 ELSE 1 END ASC",
+                    [Carbon::now()->toDateTimeString()]
+                )
+                ->orderByRaw('CASE WHEN promised_completion_at IS NULL THEN 1 ELSE 0 END ASC')
+                ->orderBy('promised_completion_at')
+                ->latest();
+        } else {
+            $query->latest();
+        }
+
+        $jobs = $query->paginate($request->integer('per_page', 20));
+        $transformed = $jobs->through(fn (ServiceJob $job): array => $this->transformJob($job));
+
+        return response()->json([
+            'jobs' => $transformed->items(),
+            'data' => $transformed->items(),
+            'current_page' => $transformed->currentPage(),
+            'last_page' => $transformed->lastPage(),
+            'per_page' => $transformed->perPage(),
+            'total' => $transformed->total(),
+        ]);
     }
 
     public function overdueSummary(): JsonResponse
@@ -84,10 +157,36 @@ class JobController extends Controller
         ]);
     }
 
+    public function publicTracking(Request $request, ServiceJob $job): JsonResponse
+    {
+        $token = trim((string) $request->query('token', ''));
+
+        if (! $job->hasValidTrackingToken($token)) {
+            return response()->json([
+                'message' => 'Invalid tracking token.',
+            ], 403);
+        }
+
+        return response()->json([
+            'job' => [
+                'job_code' => (string) $job->job_code,
+                'customer_name' => (string) ($job->customer_name ?? ''),
+                'tv_model' => (string) ($job->tv_model ?? ''),
+                'category' => strtoupper((string) ($job->category ?? 'OTHER')),
+                'status' => $this->normalizeStatus((string) $job->status),
+                'created_at' => $job->created_at?->toIso8601String(),
+                'repair_started_at' => $job->repair_started_at?->toIso8601String(),
+                'finished_at' => $job->finished_at?->toIso8601String(),
+                'out_at' => $job->out_at?->toIso8601String(),
+            ],
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canCreateJob(), 403);
 
         $payload = $request->validate([
             'customer_id' => ['sometimes', 'nullable', 'integer', Rule::exists('customers', 'id')],
@@ -99,8 +198,11 @@ class JobController extends Controller
             'issue' => ['required', 'string'],
             'estimated_price_iqd' => ['nullable', 'numeric', 'min:0'],
             'estimated_price' => ['nullable', 'numeric', 'min:0'],
+            'is_in_warranty' => ['sometimes', 'boolean'],
+            'warranty_company' => ['nullable', 'string', 'max:255', 'required_if:is_in_warranty,true'],
             'notes' => ['nullable', 'string'],
             'assigned_staff_uid' => ['nullable', 'integer', Rule::exists('users', 'id')],
+            'promised_completion_at' => ['nullable', 'date'],
         ]);
 
         $customer = null;
@@ -118,11 +220,15 @@ class JobController extends Controller
             ? User::find($payload['assigned_staff_uid'])
             : null;
 
+        $manualCustomerName = trim((string) ($payload['customer_name'] ?? ''));
+        $manualCustomerPhone = trim((string) ($payload['customer_phone'] ?? ''));
+
         $job = ServiceJob::create([
             'customer_id' => $customer ? (string) $customer->id : null,
             'customer_record_id' => $customer?->id,
-            'customer_name' => $customer?->name ?: ($payload['customer_name'] ?: 'Unknown customer'),
-            'customer_phone' => $customer?->phone ?: ($payload['customer_phone'] ?: 'Unknown phone'),
+            // Keep a job-level snapshot; manual input takes precedence over linked customer defaults.
+            'customer_name' => $manualCustomerName !== '' ? $manualCustomerName : ($customer?->name ?: 'Unknown customer'),
+            'customer_phone' => $manualCustomerPhone !== '' ? $manualCustomerPhone : ($customer?->phone ?: 'Unknown phone'),
             'tv_model' => $payload['tv_model'],
             'device_model' => $payload['tv_model'],
             'category' => strtoupper((string) ($payload['category'] ?? 'OTHER')),
@@ -130,18 +236,28 @@ class JobController extends Controller
             'priority' => strtolower((string) ($payload['priority'] ?? 'normal')),
             'issue' => $payload['issue'],
             'problem' => $payload['issue'],
+            'is_in_warranty' => (bool) ($payload['is_in_warranty'] ?? false),
+            'warranty_company' => ! empty($payload['is_in_warranty']) ? ($payload['warranty_company'] ?? null) : null,
             'estimated_price_iqd' => $payload['estimated_price_iqd'] ?? $payload['estimated_price'] ?? 0,
             'estimated_price' => $payload['estimated_price_iqd'] ?? $payload['estimated_price'] ?? 0,
             'status' => 'PENDING',
+            // Keep legacy field for older clients; value becomes true only after a successful send.
+            'whatsapp_sent' => false,
             'assigned_staff_uid' => $assignedStaff?->id,
             'notes' => $payload['notes'] ?? null,
             'created_by_user_id' => $user->id,
+            'promised_completion_at' => isset($payload['promised_completion_at'])
+                ? Carbon::parse((string) $payload['promised_completion_at'])
+                : null,
         ]);
 
         // Send WhatsApp notification for new job
-        $whatsappService = new WhatsAppService();
+        $whatsappService = new WhatsAppService;
         if ($whatsappService->sendJobCreatedMessage($job)) {
-            $job->update(['whatsapp_created_sent' => true]);
+            $job->update([
+                'whatsapp_sent' => true,
+                'whatsapp_created_sent' => true,
+            ]);
         }
 
         return response()->json([
@@ -152,7 +268,7 @@ class JobController extends Controller
 
     public function show(ServiceJob $job): JsonResponse
     {
-        $job->loadMissing(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages']);
+        $job->loadMissing(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages', 'returnedFromJob:id,job_code']);
 
         return response()->json(['job' => $this->transformJob($job)]);
     }
@@ -160,12 +276,17 @@ class JobController extends Controller
     public function update(Request $request, ServiceJob $job): JsonResponse
     {
         $payload = $request->validate([
+            'customer_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer_phone' => ['sometimes', 'nullable', 'string', 'max:50'],
             'tv_model' => ['sometimes', 'string', 'max:255'],
             'category' => ['sometimes', 'string', 'max:255'],
             'priority' => ['sometimes', 'string', 'max:50'],
             'issue' => ['sometimes', 'string'],
             'estimated_price_iqd' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'final_price_iqd' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'is_in_warranty' => ['sometimes', 'boolean'],
+            'warranty_company' => ['nullable', 'string', 'max:255', 'required_if:is_in_warranty,true'],
+            'promised_completion_at' => ['sometimes', 'nullable', 'date'],
         ]);
 
         if (array_key_exists('tv_model', $payload)) {
@@ -187,6 +308,14 @@ class JobController extends Controller
             $job->problem = $payload['issue'];
         }
 
+        if (array_key_exists('customer_name', $payload)) {
+            $job->customer_name = $payload['customer_name'] ?: 'Unknown customer';
+        }
+
+        if (array_key_exists('customer_phone', $payload)) {
+            $job->customer_phone = $payload['customer_phone'] ?: 'Unknown phone';
+        }
+
         if (array_key_exists('estimated_price_iqd', $payload)) {
             $job->estimated_price_iqd = $payload['estimated_price_iqd'];
             $job->estimated_price = $payload['estimated_price_iqd'];
@@ -195,6 +324,26 @@ class JobController extends Controller
         if (array_key_exists('final_price_iqd', $payload)) {
             $job->final_price_iqd = $payload['final_price_iqd'];
             $job->final_price = $payload['final_price_iqd'];
+        }
+
+        if (array_key_exists('is_in_warranty', $payload)) {
+            $job->is_in_warranty = (bool) $payload['is_in_warranty'];
+
+            if (! $job->is_in_warranty) {
+                $job->warranty_company = null;
+            }
+        }
+
+        if (array_key_exists('warranty_company', $payload)) {
+            $job->warranty_company = ($payload['is_in_warranty'] ?? $job->is_in_warranty)
+                ? ($payload['warranty_company'] ?? null)
+                : null;
+        }
+
+        if (array_key_exists('promised_completion_at', $payload)) {
+            $job->promised_completion_at = $payload['promised_completion_at']
+                ? Carbon::parse((string) $payload['promised_completion_at'])
+                : null;
         }
 
         $job->save();
@@ -243,6 +392,10 @@ class JobController extends Controller
 
     public function updateStatus(Request $request, ServiceJob $job): JsonResponse
     {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canOperateJobs(), 403);
+
         $payload = $request->validate([
             'status' => ['nullable', Rule::in(['PENDING', 'REPAIR', 'FINISHED', 'OUT', 'CHECKED_OUT'])],
             'final_price_iqd' => ['nullable', 'numeric', 'min:0'],
@@ -288,7 +441,9 @@ class JobController extends Controller
         if (array_key_exists('assigned_staff_uid', $payload)) {
             $assignedStaff = $payload['assigned_staff_uid'] ? User::find($payload['assigned_staff_uid']) : null;
             $job->assigned_staff_uid = $assignedStaff?->id;
-            $job->assigned_technician = $assignedStaff?->name;
+            if (Schema::hasColumn($job->getTable(), 'assigned_technician')) {
+                $job->assigned_technician = $assignedStaff?->name;
+            }
         }
 
         if ($job->status === 'REPAIR' && blank($job->repair_started_at)) {
@@ -306,17 +461,26 @@ class JobController extends Controller
         $job->save();
 
         // Send WhatsApp notifications based on status change
-        $whatsappService = new WhatsAppService();
-        if ($job->status === 'REPAIR' && !$job->whatsapp_repair_started_sent && $whatsappService->sendRepairStartedMessage($job)) {
-            $job->update(['whatsapp_repair_started_sent' => true]);
+        $whatsappService = new WhatsAppService;
+        if ($job->status === 'REPAIR' && ! $job->whatsapp_repair_started_sent && $whatsappService->sendRepairStartedMessage($job)) {
+            $job->update([
+                'whatsapp_sent' => true,
+                'whatsapp_repair_started_sent' => true,
+            ]);
         }
 
-        if ($job->status === 'FINISHED' && !$job->whatsapp_finished_sent && $whatsappService->sendJobFinishedMessage($job)) {
-            $job->update(['whatsapp_finished_sent' => true]);
+        if ($job->status === 'FINISHED' && ! $job->whatsapp_finished_sent && $whatsappService->sendJobFinishedMessage($job)) {
+            $job->update([
+                'whatsapp_sent' => true,
+                'whatsapp_finished_sent' => true,
+            ]);
         }
 
-        if (in_array($job->status, ['OUT', 'CHECKED_OUT'], true) && !$job->whatsapp_pickup_sent && $whatsappService->sendReadyForPickupMessage($job)) {
-            $job->update(['whatsapp_pickup_sent' => true]);
+        if (in_array($job->status, ['OUT', 'CHECKED_OUT'], true) && ! $job->whatsapp_pickup_sent && $whatsappService->sendReadyForPickupMessage($job)) {
+            $job->update([
+                'whatsapp_sent' => true,
+                'whatsapp_pickup_sent' => true,
+            ]);
         }
 
         return response()->json([
@@ -327,6 +491,10 @@ class JobController extends Controller
 
     public function assign(Request $request, ServiceJob $job): JsonResponse
     {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canOperateJobs(), 403);
+
         $payload = $request->validate([
             'assigned_staff_uid' => ['nullable', 'integer', Rule::exists('users', 'id')],
         ]);
@@ -336,7 +504,9 @@ class JobController extends Controller
             : null;
 
         $job->assigned_staff_uid = $assignedStaff?->id;
-        $job->assigned_technician = $assignedStaff?->name;
+        if (Schema::hasColumn($job->getTable(), 'assigned_technician')) {
+            $job->assigned_technician = $assignedStaff?->name;
+        }
         $job->save();
 
         return response()->json([
@@ -347,6 +517,10 @@ class JobController extends Controller
 
     public function updateNotes(Request $request, ServiceJob $job): JsonResponse
     {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canOperateJobs(), 403);
+
         $payload = $request->validate([
             'technician_notes' => ['nullable', 'string'],
         ]);
@@ -363,6 +537,10 @@ class JobController extends Controller
 
     public function markWhatsappSent(ServiceJob $job): JsonResponse
     {
+        /** @var User|null $user */
+        $user = request()->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canOperateJobs(), 403);
+
         $job->whatsapp_sent = true;
         $job->save();
 
@@ -372,12 +550,99 @@ class JobController extends Controller
         ]);
     }
 
+    public function createReturnJob(Request $request, ServiceJob $originalJob): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && $user->roleEnum()->canCreateJob(), 403);
+
+        $payload = $request->validate([
+            'notes' => ['nullable', 'string'],
+        ]);
+
+        // Warranty mapping by category
+        $warrantyMap = [
+            'PANEL' => 2,
+            'Screen broken' => 2,
+            'LED' => 6,
+            'M.B' => 2,
+        ];
+
+        $warrantyMonths = $warrantyMap[$originalJob->category] ?? 0;
+
+        $returnJob = ServiceJob::create([
+            'customer_id' => $originalJob->customer_id,
+            'customer_record_id' => $originalJob->customer_record_id,
+            'customer_name' => $originalJob->customer_name,
+            'customer_phone' => $originalJob->customer_phone,
+            'tv_model' => $originalJob->tv_model,
+            'device_model' => $originalJob->device_model,
+            'device_type' => $originalJob->device_type,
+            'category' => $originalJob->category,
+            'priority' => $originalJob->priority ?? 'normal',
+            'issue' => "Return from: {$originalJob->job_code}",
+            'problem' => "Return from: {$originalJob->job_code}",
+            'status' => 'PENDING',
+            'is_in_warranty' => true,
+            'warranty_company' => null,
+            'warranty_months' => $warrantyMonths,
+            'returned_from_job_id' => $originalJob->id,
+            'created_by_user_id' => $user->id,
+            'notes' => $payload['notes'] ?? null,
+            'received_at' => now(),
+        ]);
+
+        $whatsappService = new WhatsAppService;
+        if ($whatsappService->sendJobCreatedMessage($returnJob)) {
+            $returnJob->update([
+                'whatsapp_sent' => true,
+                'whatsapp_created_sent' => true,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Return job created successfully.',
+            'job' => $this->transformJob($returnJob->fresh(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages', 'returnedFromJob:id,job_code'])),
+        ], 201);
+    }
+
+    public function destroy(Request $request, ServiceJob $job): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless($user instanceof User && in_array($user->roleEnum(), [UserRole::Admin, UserRole::Accountant], true), 403);
+
+        DB::transaction(function () use ($job): void {
+            foreach ($job->jobImages()->get() as $image) {
+                if ($image->image_path) {
+                    try {
+                        if (Storage::disk('public')->exists($image->image_path)) {
+                            Storage::disk('public')->delete($image->image_path);
+                        }
+                    } catch (\Throwable) {
+                        // Storage errors should not block job deletion
+                    }
+                }
+            }
+
+            if (Schema::hasColumn('service_jobs', 'returned_from_job_id')) {
+                $job->returnedJobs()->update(['returned_from_job_id' => null]);
+            }
+
+            $job->jobImages()->delete();
+            $job->delete();
+        });
+
+        return response()->json([
+            'message' => 'Job deleted successfully.',
+        ]);
+    }
+
     public function staffOptions(): JsonResponse
     {
         $staff = User::query()
             ->whereIn('role', [
                 UserRole::Admin->value,
-                UserRole::Accountant->value,
                 UserRole::Staff->value,
                 UserRole::Technician->value,
             ])
@@ -429,6 +694,11 @@ class JobController extends Controller
             'category' => strtoupper((string) $job->category),
             'priority' => strtolower((string) $job->priority),
             'issue' => $job->issue,
+            'is_in_warranty' => (bool) $job->is_in_warranty,
+            'warranty_company' => $job->warranty_company,
+            'warranty_months' => (int) $job->warranty_months,
+            'returned_from_job_id' => $job->returned_from_job_id ? (string) $job->returned_from_job_id : null,
+            'returned_from_job_code' => $job->returnedFromJob?->job_code,
             'technician_notes' => $job->technician_notes,
             'status' => $this->normalizeStatus((string) $job->status),
             'estimated_price_iqd' => (float) ($job->estimated_price_iqd ?: 0),
@@ -453,6 +723,7 @@ class JobController extends Controller
             'not_fixed_reason' => $job->not_fixed_reason,
             'repair_started_at' => $job->repair_started_at?->toIso8601String(),
             'received_at' => $job->received_at?->toIso8601String(),
+            'promised_completion_at' => $job->promised_completion_at?->toIso8601String(),
             'finished_at' => $job->finished_at?->toIso8601String(),
             'out_at' => $job->out_at?->toIso8601String(),
             'created_at' => $job->created_at?->toIso8601String(),
@@ -461,7 +732,7 @@ class JobController extends Controller
                 ->map(fn (JobImage $image): array => [
                     'id' => (string) $image->id,
                     'path' => $image->image_path,
-                    'url' => asset('storage/' . ltrim((string) $image->image_path, '/')),
+                    'url' => asset('storage/'.ltrim((string) $image->image_path, '/')),
                     'label' => $image->label,
                     'created_at' => $image->created_at?->toIso8601String(),
                 ])
