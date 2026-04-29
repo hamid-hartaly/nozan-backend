@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Customer;
 use App\Models\ServiceJob;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -40,6 +41,81 @@ class JobApiTest extends TestCase
             'customer_phone' => '+964 750 111 2233',
             'tv_model' => 'Samsung 50"',
             'issue' => 'No picture after startup.',
+        ]);
+    }
+
+    public function test_staff_create_job_uses_submitted_name_when_phone_already_exists(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+
+        Customer::query()->create([
+            'name' => 'P.Gazhbin',
+            'phone' => '+964 750 999 0001',
+            'address' => null,
+        ]);
+
+        Sanctum::actingAs($staff);
+
+        $response = $this->postJson('/api/jobs', [
+            'customer_name' => 'Ahmed',
+            'customer_phone' => '+964 750 999 0001',
+            'tv_model' => 'LG 43"',
+            'category' => 'PANEL',
+            'priority' => 'normal',
+            'issue' => 'Line on Screen',
+        ]);
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('job.customer_name', 'Ahmed')
+            ->assertJsonPath('job.customer_phone', '+964 750 999 0001');
+
+        $this->assertDatabaseHas('service_jobs', [
+            'customer_name' => 'Ahmed',
+            'customer_phone' => '+964 750 999 0001',
+        ]);
+
+        $this->assertDatabaseHas('customers', [
+            'phone' => '+964 750 999 0001',
+            'name' => 'Ahmed',
+        ]);
+    }
+
+    public function test_staff_create_job_uses_submitted_phone_and_name_even_with_stale_customer_id(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+
+        $oldCustomer = Customer::query()->create([
+            'name' => 'P.Gazhbin',
+            'phone' => '+964 750 111 0000',
+            'address' => null,
+        ]);
+
+        Sanctum::actingAs($staff);
+
+        $response = $this->postJson('/api/jobs', [
+            'customer_id' => (string) $oldCustomer->id,
+            'customer_name' => 'Ahmed',
+            'customer_phone' => '+964 750 222 3333',
+            'tv_model' => 'Samsung 50"',
+            'category' => 'LED',
+            'priority' => 'normal',
+            'issue' => 'No display',
+        ]);
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('job.customer_name', 'Ahmed')
+            ->assertJsonPath('job.customer_phone', '+964 750 222 3333');
+
+        $this->assertDatabaseHas('service_jobs', [
+            'customer_name' => 'Ahmed',
+            'customer_phone' => '+964 750 222 3333',
+        ]);
+
+        $this->assertDatabaseHas('customers', [
+            'phone' => '+964 750 222 3333',
+            'name' => 'Ahmed',
         ]);
     }
 
