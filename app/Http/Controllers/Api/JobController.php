@@ -206,14 +206,34 @@ class JobController extends Controller
         ]);
 
         $customer = null;
+        $submittedCustomerName = trim((string) ($payload['customer_name'] ?? ''));
+        $submittedCustomerPhone = trim((string) ($payload['customer_phone'] ?? ''));
 
         if (! empty($payload['customer_id'])) {
             $customer = Customer::find($payload['customer_id']);
-        } elseif (! empty($payload['customer_phone'])) {
-            $customer = Customer::firstOrCreate(
-                ['phone' => $payload['customer_phone']],
-                ['name' => $payload['customer_name'] ?: 'Unknown customer'],
-            );
+        }
+
+        // If a phone is explicitly submitted, trust it over a potentially stale customer_id.
+        if ($submittedCustomerPhone !== '') {
+            if (! $customer instanceof Customer || trim((string) $customer->phone) !== $submittedCustomerPhone) {
+                $customer = Customer::firstOrCreate(
+                    ['phone' => $submittedCustomerPhone],
+                    ['name' => $submittedCustomerName !== '' ? $submittedCustomerName : 'Unknown customer'],
+                );
+            }
+        }
+
+        $resolvedCustomerName = $submittedCustomerName !== ''
+            ? $submittedCustomerName
+            : trim((string) ($customer?->name ?? ''));
+        $resolvedCustomerPhone = $submittedCustomerPhone !== ''
+            ? $submittedCustomerPhone
+            : trim((string) ($customer?->phone ?? ''));
+
+        // Keep customer profile in sync with the latest submitted name for this phone.
+        if ($customer instanceof Customer && $resolvedCustomerName !== '' && trim((string) $customer->name) !== $resolvedCustomerName) {
+            $customer->name = $resolvedCustomerName;
+            $customer->save();
         }
 
         $assignedStaff = isset($payload['assigned_staff_uid'])
@@ -223,8 +243,8 @@ class JobController extends Controller
         $job = ServiceJob::create([
             'customer_id' => $customer ? (string) $customer->id : null,
             'customer_record_id' => $customer?->id,
-            'customer_name' => $customer?->name ?: ($payload['customer_name'] ?: 'Unknown customer'),
-            'customer_phone' => $customer?->phone ?: ($payload['customer_phone'] ?: 'Unknown phone'),
+            'customer_name' => $resolvedCustomerName !== '' ? $resolvedCustomerName : 'Unknown customer',
+            'customer_phone' => $resolvedCustomerPhone !== '' ? $resolvedCustomerPhone : 'Unknown phone',
             'tv_model' => $payload['tv_model'],
             'device_model' => $payload['tv_model'],
             'category' => strtoupper((string) ($payload['category'] ?? 'OTHER')),
