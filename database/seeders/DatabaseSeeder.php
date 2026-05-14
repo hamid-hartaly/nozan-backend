@@ -64,4 +64,3 @@ class DatabaseSeeder extends Seeder
         $inventoryItem->save();
     }
 }
-

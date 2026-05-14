@@ -9,13 +9,13 @@ use App\Filament\Resources\Jobs\Tables\JobsTable;
 use App\Models\Customer;
 use App\Models\ServiceJob;
 use BackedEnum;
-use Illuminate\Database\Eloquent\Builder;
 use Filament\Forms;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class JobResource extends Resource
 {
@@ -140,15 +140,13 @@ class JobResource extends Resource
                         ->numeric()
                         ->inputMode('decimal')
                         ->prefix('IQD')
-                        ->visible(fn ($get) =>
-                            $get('status') === 'finished' && $get('repair_outcome') === 'repaired'
+                        ->visible(fn ($get) => $get('status') === 'finished' && $get('repair_outcome') === 'repaired'
                         ),
 
                     Forms\Components\Textarea::make('repair_notes')
                         ->label('چی شتێک چاککرا')
                         ->rows(4)
-                        ->visible(fn ($get) =>
-                            $get('status') === 'finished' && $get('repair_outcome') === 'repaired'
+                        ->visible(fn ($get) => $get('status') === 'finished' && $get('repair_outcome') === 'repaired'
                         ),
 
                     Forms\Components\Select::make('cannot_repair_reason')
@@ -158,8 +156,7 @@ class JobResource extends Resource
                             'no_materials' => 'مەواد نیە',
                             'owner_declined' => 'خاوەنی چاکی ناکات',
                         ])
-                        ->visible(fn ($get) =>
-                            $get('status') === 'finished' && $get('repair_outcome') === 'cannot_repair'
+                        ->visible(fn ($get) => $get('status') === 'finished' && $get('repair_outcome') === 'cannot_repair'
                         ),
                 ])
                 ->columns(2),

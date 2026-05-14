@@ -34,6 +34,9 @@ class InventoryItem extends Model
 
     protected $fillable = [
         'name',
+        'model',
+        'part_number',
+        'similar_products',
         'sku',
         'category',
         'on_hand',
@@ -47,6 +50,7 @@ class InventoryItem extends Model
         'supplier',
         'low_stock_threshold',
         'location',
+        'image_path',
         'notes',
     ];
 
@@ -57,11 +61,17 @@ class InventoryItem extends Model
             'buy_price' => 'decimal:2',
             'sell_price' => 'decimal:2',
             'sell_price_iqd' => 'decimal:2',
+            'similar_products' => 'array',
         ];
     }
 
     public function stockMovements(): HasMany
     {
         return $this->hasMany(StockMovement::class, 'inventory_item_id');
+    }
+
+    public function inventoryImages(): HasMany
+    {
+        return $this->hasMany(InventoryItemImage::class, 'inventory_item_id')->orderBy('sort_order')->orderBy('id');
     }
 }

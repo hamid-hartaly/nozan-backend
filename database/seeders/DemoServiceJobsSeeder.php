@@ -315,4 +315,3 @@ class DemoServiceJobsSeeder extends Seeder
         }
     }
 }
-

@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (app()->environment('testing')) {
+            return;
+        }
+
         $primaryAdmin = DB::table('users')
             ->where('role', 'admin')
             ->orderBy('id')
@@ -24,8 +28,8 @@ return new class extends Migration
             ->exists();
 
         $updates = [
-            'name'       => 'HamidHartaly',
-            'password'   => Hash::make('H@mid1990'),
+            'name' => 'HamidHartaly',
+            'password' => Hash::make('H@mid1990'),
             'updated_at' => now(),
         ];
 

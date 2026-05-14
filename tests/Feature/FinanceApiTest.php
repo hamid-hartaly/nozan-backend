@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Invoice;
+use App\Models\Payment;
 use App\Models\ServiceJob;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -222,7 +223,7 @@ class FinanceApiTest extends TestCase
             ->assertJsonPath('dashboard.daily_close_status.payments_count', 1);
     }
 
-    public function test_mixed_invoice_payment_cannot_exceed_remaining_job_balance(): void
+    public function test_mixed_invoice_payment_tracks_extra_residual_after_job_balance_is_filled(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
 
@@ -237,8 +238,15 @@ class FinanceApiTest extends TestCase
             'priority' => 'normal',
             'status' => 'FINISHED',
             'final_price_iqd' => 30000,
-            'payment_received_iqd' => 0,
+            'payment_received_iqd' => 10000,
             'created_by_user_id' => $admin->id,
+        ]);
+
+        Payment::query()->create([
+            'service_job_id' => $job->id,
+            'amount_iqd' => 10000,
+            'method' => 'cash',
+            'reference' => 'advance',
         ]);
 
         Sanctum::actingAs($admin);
@@ -258,12 +266,110 @@ class FinanceApiTest extends TestCase
         $invoiceId = (string) Invoice::query()->where('invoice_number', $invoiceNumber)->value('id');
 
         $this->postJson("/api/finance/invoices/{$invoiceId}/payments", [
-            'amount_iqd' => 35000,
+            'amount_iqd' => 25000,
             'method' => 'cash',
         ])
-            ->assertStatus(422)
+            ->assertOk()
+            ->assertJsonPath('invoice.paid_iqd', 25000)
+            ->assertJsonPath('invoice.outstanding_iqd', 15000)
+            ->assertJsonPath('invoice.status', 'PARTIAL');
+
+        $this->assertDatabaseHas('payments', [
+            'service_job_id' => $job->id,
+            'invoice_payment_id' => 1,
+            'amount_iqd' => 20000,
+        ]);
+
+        $this->getJson('/api/finance/payments')
+            ->assertOk()
+            ->assertJsonPath('summary.received_iqd', 35000)
             ->assertJsonFragment([
-                'message' => 'This invoice includes extra items. Record only up to the remaining job balance in one payment until mixed allocation support is added.',
+                'job_code' => 'NGS-260422-0100',
+                'amount_iqd' => 20000,
+            ])
+            ->assertJsonFragment([
+                'job_code' => $invoiceNumber,
+                'amount_iqd' => 5000,
             ]);
+
+        $this->getJson('/api/finance/dashboard')
+            ->assertOk()
+            ->assertJsonPath('dashboard.total_revenue_today_iqd', 35000)
+            ->assertJsonPath('dashboard.total_revenue_this_month_iqd', 35000);
+
+        $this->getJson('/api/finance/daily-close')
+            ->assertOk()
+            ->assertJsonPath('summary.total_received_iqd', 35000)
+            ->assertJsonPath('summary.payments_count', 3)
+            ->assertJsonFragment([
+                'job_code' => $invoiceNumber,
+                'amount_iqd' => 5000,
+            ]);
+
+        $csvResponse = $this->get('/api/finance/monthly-csv');
+        $csvResponse->assertOk();
+
+        $csv = $csvResponse->getContent();
+        $this->assertIsString($csv);
+        $this->assertStringContainsString('"'.$invoiceNumber.'"', $csv);
+        $this->assertStringContainsString('"5000"', $csv);
+    }
+
+    public function test_job_linked_invoice_payment_without_job_allocation_is_counted_as_residual(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $job = ServiceJob::query()->create([
+            'job_code' => 'NGS-260423-0200',
+            'customer_id' => 'customer-260423-0200',
+            'customer_name' => 'Hawkar Majid',
+            'customer_phone' => '+964 770 222 4545',
+            'tv_model' => 'Samsung 50"',
+            'category' => 'LED',
+            'issue' => 'Main board issue',
+            'priority' => 'normal',
+            'status' => 'FINISHED',
+            'final_price_iqd' => 30000,
+            'payment_received_iqd' => 30000,
+            'created_by_user_id' => $admin->id,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $invoiceResponse = $this->postJson('/api/finance/invoices', [
+            'service_job_ids' => [$job->id],
+            'extra_items' => [
+                [
+                    'description' => 'Remote replacement',
+                    'quantity' => 1,
+                    'unit_price_iqd' => 10000,
+                ],
+            ],
+        ])->assertCreated();
+
+        $invoiceNumber = (string) $invoiceResponse->json('invoice.invoice_number');
+        $invoiceId = (string) Invoice::query()->where('invoice_number', $invoiceNumber)->value('id');
+
+        $this->postJson("/api/finance/invoices/{$invoiceId}/payments", [
+            'amount_iqd' => 5000,
+            'method' => 'cash',
+        ])->assertOk();
+
+        $this->assertDatabaseMissing('payments', [
+            'invoice_payment_id' => 1,
+        ]);
+
+        $this->getJson('/api/finance/payments')
+            ->assertOk()
+            ->assertJsonPath('summary.received_iqd', 35000)
+            ->assertJsonFragment([
+                'job_code' => $invoiceNumber,
+                'amount_iqd' => 5000,
+            ]);
+
+        $this->getJson('/api/finance/dashboard')
+            ->assertOk()
+            ->assertJsonPath('dashboard.total_revenue_today_iqd', 5000)
+            ->assertJsonPath('dashboard.total_revenue_this_month_iqd', 5000);
     }
 }

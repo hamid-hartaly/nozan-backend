@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\Customer;
@@ -16,11 +17,24 @@ use Illuminate\Validation\Rule;
 
 class BookingController extends Controller
 {
+    private function authorizeAdminOrAccountant(Request $request): void
+    {
+        /** @var User|null $user */
+        $user = $request->user();
+        abort_unless(
+            $user instanceof User && in_array($user->roleEnum()->value, [UserRole::Admin->value, UserRole::Accountant->value], true),
+            403,
+            'Only admin or accountant can access booking management.'
+        );
+    }
+
     /**
      * List all bookings (admin only)
      */
     public function index(Request $request): JsonResponse
     {
+        $this->authorizeAdminOrAccountant($request);
+
         $query = Booking::query();
 
         if ($status = $request->string('status')->toString()) {
@@ -50,9 +64,10 @@ class BookingController extends Controller
         $payload = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'phone' => ['required', 'string', 'max:50'],
+            'device_type' => ['required', 'string', 'in:television,washing_machine,refrigerator,split_ac'],
             'tv_model' => ['required', 'string', 'max:255'],
-            'description' => ['required', 'string'],
-            'address' => ['required', 'string'],
+            'description' => ['required', 'string', 'max:5000'],
+            'address' => ['required', 'string', 'max:500'],
             'image' => ['nullable', 'image', 'max:8192'],
         ]);
 
@@ -64,12 +79,16 @@ class BookingController extends Controller
         $booking = Booking::create([
             'name' => $payload['name'],
             'phone' => $payload['phone'],
+            'device_type' => $payload['device_type'],
             'tv_model' => $payload['tv_model'],
             'description' => $payload['description'],
             'address' => $payload['address'],
             'image_path' => $imagePath,
             'status' => 'pending',
         ]);
+
+        $whatsappService = new WhatsAppService;
+        $whatsappService->sendBookingSubmittedMessage($booking->phone, $booking->name);
 
         return response()->json([
             'message' => 'شکریا، داواکاریەکە بە سەرکەوتوویی پێشکەش کرا. بۆ زیانی کپیدا لێنێ.',
@@ -80,8 +99,10 @@ class BookingController extends Controller
     /**
      * Get a single booking
      */
-    public function show(Booking $booking): JsonResponse
+    public function show(Request $request, Booking $booking): JsonResponse
     {
+        $this->authorizeAdminOrAccountant($request);
+
         return response()->json(['booking' => $this->transformBooking($booking)]);
     }
 
@@ -90,6 +111,7 @@ class BookingController extends Controller
      */
     public function update(Request $request, Booking $booking): JsonResponse
     {
+        $this->authorizeAdminOrAccountant($request);
         $payload = $request->validate([
             'status' => ['required', Rule::in(['pending', 'converted', 'rejected'])],
             'notes' => ['nullable', 'string'],
@@ -117,6 +139,8 @@ class BookingController extends Controller
      */
     public function convertToJob(Request $request, Booking $booking): JsonResponse
     {
+        $this->authorizeAdminOrAccountant($request);
+
         /** @var User $user */
         $user = $request->user();
 
@@ -150,8 +174,8 @@ class BookingController extends Controller
 
             $notes = array_filter([
                 $payload['notes'] ?? null,
-                $booking->notes ? 'Booking notes: ' . $booking->notes : null,
-                'Customer address: ' . $booking->address,
+                $booking->notes ? 'Booking notes: '.$booking->notes : null,
+                'Customer address: '.$booking->address,
             ]);
 
             $job = ServiceJob::create([
@@ -187,7 +211,7 @@ class BookingController extends Controller
             $booking->notes = $payload['notes'] ?? $booking->notes;
             $booking->save();
 
-            $whatsappService = new WhatsAppService();
+            $whatsappService = new WhatsAppService;
             if ($whatsappService->sendJobCreatedMessage($job)) {
                 $job->update(['whatsapp_created_sent' => true]);
             }
@@ -205,8 +229,10 @@ class BookingController extends Controller
     /**
      * Delete a booking (admin only)
      */
-    public function destroy(Booking $booking): JsonResponse
+    public function destroy(Request $request, Booking $booking): JsonResponse
     {
+        $this->authorizeAdminOrAccountant($request);
+
         if ($booking->image_path && Storage::disk('public')->exists($booking->image_path)) {
             Storage::disk('public')->delete($booking->image_path);
         }
@@ -225,11 +251,12 @@ class BookingController extends Controller
             'id' => (string) $booking->id,
             'name' => $booking->name,
             'phone' => $booking->phone,
+            'device_type' => $booking->device_type,
             'tv_model' => $booking->tv_model,
             'description' => $booking->description,
             'address' => $booking->address,
             'image_path' => $booking->image_path,
-            'image_url' => $booking->image_path ? asset('storage/' . ltrim($booking->image_path, '/')) : null,
+            'image_url' => $booking->image_path ? asset('storage/'.ltrim($booking->image_path, '/')) : null,
             'status' => $booking->status,
             'converted_at' => $booking->converted_at?->toIso8601String(),
             'converted_job_code' => $booking->converted_job_code,
@@ -251,4 +278,3 @@ class BookingController extends Controller
         ];
     }
 }
-

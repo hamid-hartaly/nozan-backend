@@ -9,6 +9,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (app()->environment('testing')) {
+            return;
+        }
+
         if (! Schema::hasTable('users')) {
             return;
         }

@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\Auth;
  * @property int $id
  * @property string|null $invoice_number
  * @property string|null $customer_name
+ * @property string|null $customer_phone
+ * @property string|null $customer_address
  * @property string|float|int $subtotal_iqd
  * @property string|float|int $discount_iqd
  * @property string|float|int $tax_iqd
@@ -32,6 +34,8 @@ class Invoice extends Model
     protected $fillable = [
         'invoice_number',
         'customer_name',
+        'customer_phone',
+        'customer_address',
         'subtotal_iqd',
         'discount_iqd',
         'tax_iqd',
@@ -76,5 +80,10 @@ class Invoice extends Model
     public function lineItems(): HasMany
     {
         return $this->hasMany(InvoiceLineItem::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(InvoicePayment::class);
     }
 }
