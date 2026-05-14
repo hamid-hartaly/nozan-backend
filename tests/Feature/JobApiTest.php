@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\Customer;
 use App\Models\ServiceJob;
+use App\Models\Customer;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -144,6 +144,39 @@ class JobApiTest extends TestCase
         $this->assertDatabaseCount('service_jobs', 1);
     }
 
+    public function test_staff_cannot_create_duplicate_open_job_for_same_customer(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+        Sanctum::actingAs($staff);
+
+        ServiceJob::query()->create([
+            'job_code' => 'NGS-260430-0001',
+            'customer_id' => 'customer-260430-0001',
+            'customer_name' => 'Raman Ali',
+            'customer_phone' => '+964 750 555 1234',
+            'tv_model' => 'Samsung 55"',
+            'category' => 'LED',
+            'issue' => 'No display',
+            'priority' => 'normal',
+            'status' => 'PENDING',
+            'created_by_user_id' => $staff->id,
+        ]);
+
+        $this->postJson('/api/jobs', [
+            'customer_name' => 'Raman Ali',
+            'customer_phone' => '+964 750 555 1234',
+            'tv_model' => 'LG 43"',
+            'category' => 'PANEL',
+            'priority' => 'normal',
+            'issue' => 'Line on Screen',
+            'estimated_price_iqd' => 20000,
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('job_code', 'NGS-260430-0001');
+
+        $this->assertDatabaseCount('service_jobs', 1);
+    }
+
     public function test_staff_can_update_promised_completion_date(): void
     {
         $staff = User::factory()->create(['role' => 'staff']);
@@ -174,7 +207,7 @@ class JobApiTest extends TestCase
         ]);
     }
 
-    public function test_accountant_can_list_jobs_but_cannot_create_or_change_status(): void
+    public function test_accountant_can_list_jobs_and_manage_job_flow(): void
     {
         $accountant = User::factory()->create(['role' => 'accountant']);
         $job = ServiceJob::query()->create([
@@ -186,7 +219,7 @@ class JobApiTest extends TestCase
             'category' => 'LED',
             'issue' => 'Audio board failure and HDMI port cleaning.',
             'priority' => 'normal',
-            'status' => 'FINISHED',
+            'status' => 'PENDING',
             'created_by_user_id' => $accountant->id,
         ]);
 
@@ -197,16 +230,17 @@ class JobApiTest extends TestCase
             ->assertJsonPath('jobs.0.job_code', $job->job_code);
 
         $this->postJson('/api/jobs', [
-            'customer_name' => 'Denied User',
+            'customer_name' => 'Accounting User',
             'customer_phone' => '+964 770 000 0000',
             'tv_model' => 'Sony 49"',
             'category' => 'LED',
             'priority' => 'normal',
-            'issue' => 'Should fail.',
-        ])->assertForbidden();
+            'issue' => 'Accounting-created job.',
+        ])->assertCreated();
 
         $this->postJson("/api/jobs/{$job->job_code}/status")
-            ->assertForbidden();
+            ->assertOk()
+            ->assertJsonPath('job.status', 'REPAIR');
     }
 
     public function test_payment_action_is_limited_to_cashier_capable_roles(): void
@@ -274,6 +308,41 @@ class JobApiTest extends TestCase
         $this->assertNotNull($job->repair_started_at);
     }
 
+    public function test_staff_can_create_return_job_with_customer_override(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+
+        $originalJob = ServiceJob::query()->create([
+            'job_code' => 'NGS-260430-0099',
+            'customer_id' => 'customer-260430-0099',
+            'customer_name' => 'P.Gazhbin',
+            'customer_phone' => '07504652844',
+            'tv_model' => 'LG 55"',
+            'category' => 'Screen broken',
+            'issue' => 'Broken panel.',
+            'priority' => 'normal',
+            'status' => 'FINISHED',
+            'created_by_user_id' => $staff->id,
+        ]);
+
+        Sanctum::actingAs($staff);
+
+        $this->postJson("/api/jobs/{$originalJob->job_code}/return", [
+            'notes' => 'Customer returned for recheck.',
+            'customer_name' => 'Fatma',
+            'customer_phone' => '07701234567',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('job.customer_name', 'Fatma')
+            ->assertJsonPath('job.customer_phone', '07701234567');
+
+        $this->assertDatabaseHas('service_jobs', [
+            'customer_name' => 'Fatma',
+            'customer_phone' => '07701234567',
+            'returned_from_job_id' => $originalJob->id,
+        ]);
+    }
+
     public function test_staff_can_list_assignable_staff_and_assign_job(): void
     {
         $actingStaff = User::factory()->create(['role' => 'staff']);
@@ -314,7 +383,7 @@ class JobApiTest extends TestCase
             ->assertJsonPath('job.technician_notes', 'Power board tested. Main capacitor needs replacement.');
     }
 
-    public function test_accountant_cannot_assign_staff_to_job(): void
+    public function test_accountant_can_assign_staff_to_job(): void
     {
         $accountant = User::factory()->create(['role' => 'accountant']);
         $staff = User::factory()->create(['role' => 'staff']);
@@ -335,11 +404,15 @@ class JobApiTest extends TestCase
 
         $this->postJson("/api/jobs/{$job->job_code}/assign", [
             'assigned_staff_uid' => $staff->id,
-        ])->assertForbidden();
+        ])
+            ->assertOk()
+            ->assertJsonPath('job.assigned_staff_uid', (string) $staff->id);
 
         $this->postJson("/api/jobs/{$job->job_code}/notes", [
-            'technician_notes' => 'Should not be allowed.',
-        ])->assertForbidden();
+            'technician_notes' => 'Allowed for accountant role.',
+        ])
+            ->assertOk()
+            ->assertJsonPath('job.technician_notes', 'Allowed for accountant role.');
     }
 
     public function test_staff_can_filter_jobs_by_promised_day_and_overdue(): void

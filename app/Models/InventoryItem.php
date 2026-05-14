@@ -69,4 +69,9 @@ class InventoryItem extends Model
     {
         return $this->hasMany(StockMovement::class, 'inventory_item_id');
     }
+
+    public function inventoryImages(): HasMany
+    {
+        return $this->hasMany(InventoryItemImage::class, 'inventory_item_id')->orderBy('sort_order')->orderBy('id');
+    }
 }

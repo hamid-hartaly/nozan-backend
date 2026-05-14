@@ -183,10 +183,17 @@ class WhatsAppService
             return false;
         }
 
+        $customerName = $this->safeCustomerName($job->customer_name);
+        $deviceName = $this->safeDeviceName($job->tv_model);
+
         $message = sprintf(
-            "تنبيه: بدأ إصلاح جهازك\n\nرقم الطلب: %s\nالجهاز: %s\n\nسيتم إخطارك عند انتهاء الإصلاح.",
+            "سڵاو %s،\n\nکارکردن لەسەر چاككردنەوەی ئامێرەکەتان دەستی پێکرد.\n\nژمارەی جۆب: %s\nئامێر: %s\n\nئێمە ئاگاداریتان دەکەینەوە کاتێک چاككردنەوەکە تەواو بێت.\n\nمرحبا %s،\n\nبدأ العمل على إصلاح جهازكم.\n\nرقم الطلب: %s\nالجهاز: %s\n\nسنقوم بإخطاركم عند انتهاء الإصلاح.",
+            $customerName,
             $job->job_code,
-            $job->tv_model
+            $deviceName,
+            $customerName,
+            $job->job_code,
+            $deviceName
         );
 
         return $this->sendMessage($job->customer_phone, $message, WhatsAppEvent::JOB_REPAIR_STARTED->templateName());
@@ -198,12 +205,21 @@ class WhatsAppService
             return false;
         }
 
+        $customerName = $this->safeCustomerName($job->customer_name);
+        $deviceName = $this->safeDeviceName($job->tv_model);
         $price = (float) ($job->final_price_iqd ?? $job->estimated_price_iqd);
+        $priceLabel = $this->formatIqdWithUsd($price);
+
         $message = sprintf(
-            "أخبار سارة! انتهى إصلاح جهازك\n\nرقم الطلب: %s\nالفئة: %s\nالسعر: %s د.ع\n\nيمكنك استلام جهازك في أي وقت.",
+            "سڵاو %s،\n\nخەبەری باش! چاككردنەوەی ئامێرەکەتان بە سەرکەوتوویی تەواو بوو.\n\nژمارەی جۆب: %s\nئامێر: %s\nنرخ: %s\n\nدەتوانن ئامێرەکەتان بهێنن.\n\nمرحبا %s،\n\nأخبار سارة! انتهى إصلاح جهازكم بنجاح.\n\nرقم الطلب: %s\nالجهاز: %s\nالسعر: %s\n\nيمكنكم استلام جهازكم الآن.",
+            $customerName,
             $job->job_code,
-            $job->category,
-            number_format($price)
+            $deviceName,
+            $priceLabel,
+            $customerName,
+            $job->job_code,
+            $deviceName,
+            $priceLabel
         );
 
         return $this->sendMessage($job->customer_phone, $message, WhatsAppEvent::JOB_FINISHED->templateName());
@@ -215,12 +231,21 @@ class WhatsAppService
             return false;
         }
 
+        $customerName = $this->safeCustomerName($job->customer_name);
+        $deviceName = $this->safeDeviceName($job->tv_model);
         $unpaidAmount = max(((float) ($job->final_price_iqd ?? $job->estimated_price_iqd ?? 0)) - ((float) ($job->payment_received_iqd ?? 0)), 0);
+        $remainingLabel = $this->formatIqdWithUsd($unpaidAmount);
 
         $message = sprintf(
-            "جهازك جاهز للاستلام\n\nرقم الطلب: %s\nالمبلغ المتبقي: %s د.ع\n\nشكراً لتعاملك معنا!",
+            "سڵاو %s،\n\nئامێرەکەتان ئامادەی وەرگرتنه.\n\nژمارەی جۆب: %s\nئامێر: %s\nماوەی دراو: %s\n\nتکایە بێن بۆ وەرگرتنی ئامێرەکەتان و تەواوکردنی پارەدان.\n\nمرحبا %s،\n\nجهازكم جاهز للاستلام.\n\nرقم الطلب: %s\nالجهاز: %s\nالمبلغ المتبقي: %s\n\nيرجى زيارتنا لاستلام جهازكم وإتمام الدفع.",
+            $customerName,
             $job->job_code,
-            number_format($unpaidAmount)
+            $deviceName,
+            $remainingLabel,
+            $customerName,
+            $job->job_code,
+            $deviceName,
+            $remainingLabel
         );
 
         return $this->sendMessage($job->customer_phone, $message, WhatsAppEvent::JOB_READY_FOR_PICKUP->templateName());
@@ -232,13 +257,21 @@ class WhatsAppService
             return false;
         }
 
+        $customerName = $this->safeCustomerName($job->customer_name);
         $unpaidAmount = max(((float) ($job->final_price_iqd ?? $job->estimated_price_iqd ?? 0)) - ((float) ($job->payment_received_iqd ?? 0)), 0);
+        $paidAmountLabel = $this->formatIqdWithUsd((float) $amountIqd);
+        $remainingLabel = $this->formatIqdWithUsd($unpaidAmount);
 
         $message = sprintf(
-            "تم استلام دفعة\n\nرقم الطلب: %s\nالمبلغ: %s د.ع\nالمتبقي: %s د.ع\n\nشكراً!",
+            "سڵاو %s،\n\nپارەدانی %s وەرگیرا.\n\nژمارەی جۆب: %s\nماوەی دراو: %s\n\nسوپاس!\n\nمرحبا %s،\n\nتم استلام دفعة بمبلغ %s.\n\nرقم الطلب: %s\nالمبلغ المتبقي: %s\n\nشكراً!",
+            $customerName,
+            $paidAmountLabel,
             $job->job_code,
-            number_format((float) $amountIqd),
-            number_format($unpaidAmount)
+            $remainingLabel,
+            $customerName,
+            $paidAmountLabel,
+            $job->job_code,
+            $remainingLabel
         );
 
         return $this->sendMessage($job->customer_phone, $message, WhatsAppEvent::PAYMENT_RECORDED->templateName());
@@ -303,6 +336,11 @@ class WhatsAppService
 
             return false;
         }
+    }
+
+    private function formatIqdWithUsd(float $amountIqd): string
+    {
+        return sprintf('%s د.ع', number_format($amountIqd));
     }
 
     private function formatPhoneNumber(string $phone): string

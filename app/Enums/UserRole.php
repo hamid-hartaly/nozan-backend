@@ -40,7 +40,7 @@ enum UserRole: string
     public function canCreateJob(): bool
     {
         return match ($this) {
-            self::Admin, self::Staff => true,
+            self::Admin, self::Staff, self::Accountant => true,
             default => false,
         };
     }
@@ -48,7 +48,7 @@ enum UserRole: string
     public function canOperateJobs(): bool
     {
         return match ($this) {
-            self::Admin, self::Staff, self::Technician => true,
+            self::Admin, self::Staff, self::Technician, self::Accountant => true,
             default => false,
         };
     }

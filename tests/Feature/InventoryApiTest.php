@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\InventoryItem;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -47,5 +49,36 @@ class InventoryApiTest extends TestCase
 
         $this->getJson('/api/inventory')
             ->assertForbidden();
+    }
+
+    public function test_staff_can_create_inventory_item_with_multiple_images(): void
+    {
+        Storage::fake('public');
+        Sanctum::actingAs(User::factory()->create(['role' => 'staff']));
+
+        $response = $this->post('/api/inventory', [
+            'name' => 'COF Flex Cable',
+            'category' => 'COF',
+            'part_number' => 'COF-9988',
+            'location' => 'A-01',
+            'unit_cost_iqd' => 12000,
+            'photos' => [
+                UploadedFile::fake()->create('cof-front.jpg', 120, 'image/jpeg'),
+                UploadedFile::fake()->create('cof-back.jpg', 120, 'image/jpeg'),
+            ],
+        ]);
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('item.name', 'COF Flex Cable')
+            ->assertJsonCount(2, 'item.images');
+
+        $item = InventoryItem::query()->firstOrFail();
+
+        $this->assertNotNull($item->image_path);
+        $this->assertCount(2, $item->inventoryImages);
+        foreach ($item->inventoryImages as $image) {
+            Storage::disk('public')->assertExists($image->image_path);
+        }
     }
 }

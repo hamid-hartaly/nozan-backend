@@ -26,8 +26,14 @@ class JobController extends Controller
         $user = $request->user();
         abort_unless($user instanceof User && $user->roleEnum()->canAccessJobs(), 403);
 
-        $query = ServiceJob::query()
-            ->with(['assignedStaff:id,name', 'createdBy:id,name,role', 'jobImages', 'returnedFromJob:id,job_code']);
+        $includeDetails = $request->boolean('include_details', false);
+
+        $relations = ['assignedStaff:id,name', 'createdBy:id,name,role', 'returnedFromJob:id,job_code'];
+        if ($includeDetails) {
+            $relations[] = 'jobImages';
+        }
+
+        $query = ServiceJob::query()->with($relations);
 
         $filters = $request->validate([
             'promise' => ['nullable', Rule::in(['today', 'tomorrow', 'overdue', 'all', 'none'])],
@@ -116,7 +122,7 @@ class JobController extends Controller
         }
 
         $jobs = $query->paginate($request->integer('per_page', 20));
-        $transformed = $jobs->through(fn (ServiceJob $job): array => $this->transformJob($job));
+        $transformed = $jobs->through(fn (ServiceJob $job): array => $this->transformJob($job, $includeDetails));
 
         return response()->json([
             'jobs' => $transformed->items(),
@@ -223,6 +229,10 @@ class JobController extends Controller
             }
         }
 
+        $assignedStaff = isset($payload['assigned_staff_uid'])
+            ? User::find($payload['assigned_staff_uid'])
+            : null;
+
         $resolvedCustomerName = $submittedCustomerName !== ''
             ? $submittedCustomerName
             : trim((string) ($customer?->name ?? ''));
@@ -236,9 +246,35 @@ class JobController extends Controller
             $customer->save();
         }
 
-        $assignedStaff = isset($payload['assigned_staff_uid'])
-            ? User::find($payload['assigned_staff_uid'])
-            : null;
+        $duplicateOpenJobQuery = ServiceJob::query()
+            ->whereNotIn('status', ['OUT', 'CHECKED_OUT']);
+
+        if ($customer?->id) {
+            $duplicateOpenJobQuery->where(function ($query) use ($customer, $resolvedCustomerName, $resolvedCustomerPhone): void {
+                $query
+                    ->where('customer_record_id', $customer->id)
+                    ->orWhere(function ($legacyQuery) use ($resolvedCustomerName, $resolvedCustomerPhone): void {
+                        $legacyQuery
+                            ->where('customer_name', $resolvedCustomerName)
+                            ->where('customer_phone', $resolvedCustomerPhone);
+                    });
+            });
+        } else {
+            $duplicateOpenJobQuery
+                ->where('customer_name', $resolvedCustomerName)
+                ->where('customer_phone', $resolvedCustomerPhone);
+        }
+
+        $existingOpenJob = $duplicateOpenJobQuery
+            ->orderByDesc('created_at')
+            ->first();
+
+        if ($existingOpenJob instanceof ServiceJob) {
+            return response()->json([
+                'message' => "Open job already exists for this customer: {$existingOpenJob->job_code}",
+                'job_code' => (string) $existingOpenJob->job_code,
+            ], 422);
+        }
 
         $job = ServiceJob::create([
             'customer_id' => $customer ? (string) $customer->id : null,
@@ -556,7 +592,7 @@ class JobController extends Controller
         ]);
     }
 
-    public function createReturnJob(Request $request, ServiceJob $originalJob): JsonResponse
+    public function createReturnJob(Request $request, ServiceJob $job): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
@@ -564,7 +600,37 @@ class JobController extends Controller
 
         $payload = $request->validate([
             'notes' => ['nullable', 'string'],
+            'customer_name' => ['nullable', 'string', 'max:255'],
+            'customer_phone' => ['nullable', 'string', 'max:50'],
         ]);
+
+        $overrideCustomerName = trim((string) ($payload['customer_name'] ?? ''));
+        $overrideCustomerPhone = trim((string) ($payload['customer_phone'] ?? ''));
+
+        $resolvedCustomerName = $overrideCustomerName !== ''
+            ? $overrideCustomerName
+            : (string) ($job->customer_name ?? 'Unknown customer');
+        $resolvedCustomerPhone = $overrideCustomerPhone !== ''
+            ? $overrideCustomerPhone
+            : (string) ($job->customer_phone ?? 'Unknown phone');
+
+        $resolvedCustomerRecordId = $job->customer_record_id;
+        $resolvedCustomerId = $job->customer_id;
+
+        if ($resolvedCustomerPhone !== '') {
+            $customer = Customer::firstOrCreate(
+                ['phone' => $resolvedCustomerPhone],
+                ['name' => $resolvedCustomerName !== '' ? $resolvedCustomerName : 'Unknown customer'],
+            );
+
+            if ($resolvedCustomerName !== '' && trim((string) $customer->name) !== $resolvedCustomerName) {
+                $customer->name = $resolvedCustomerName;
+                $customer->save();
+            }
+
+            $resolvedCustomerRecordId = $customer->id;
+            $resolvedCustomerId = (string) $customer->id;
+        }
 
         // Warranty mapping by category
         $warrantyMap = [
@@ -574,25 +640,29 @@ class JobController extends Controller
             'M.B' => 2,
         ];
 
-        $warrantyMonths = $warrantyMap[$originalJob->category] ?? 0;
+        $warrantyMonths = $warrantyMap[$job->category] ?? 0;
+
+        $resolvedTvModel = (string) ($job->tv_model ?: $job->device_model ?: 'Unknown model');
+        $resolvedCategory = (string) ($job->category ?: 'OTHER');
+        $resolvedDeviceType = (string) ($job->device_type ?: $resolvedCategory);
 
         $returnJob = ServiceJob::create([
-            'customer_id' => $originalJob->customer_id,
-            'customer_record_id' => $originalJob->customer_record_id,
-            'customer_name' => $originalJob->customer_name,
-            'customer_phone' => $originalJob->customer_phone,
-            'tv_model' => $originalJob->tv_model,
-            'device_model' => $originalJob->device_model,
-            'device_type' => $originalJob->device_type,
-            'category' => $originalJob->category,
-            'priority' => $originalJob->priority ?? 'normal',
-            'issue' => "Return from: {$originalJob->job_code}",
-            'problem' => "Return from: {$originalJob->job_code}",
+            'customer_id' => $resolvedCustomerId,
+            'customer_record_id' => $resolvedCustomerRecordId,
+            'customer_name' => $resolvedCustomerName,
+            'customer_phone' => $resolvedCustomerPhone,
+            'tv_model' => $resolvedTvModel,
+            'device_model' => $resolvedTvModel,
+            'device_type' => $resolvedDeviceType,
+            'category' => $resolvedCategory,
+            'priority' => $job->priority ?? 'normal',
+            'issue' => "Return from: {$job->job_code}",
+            'problem' => "Return from: {$job->job_code}",
             'status' => 'PENDING',
             'is_in_warranty' => true,
             'warranty_company' => null,
             'warranty_months' => $warrantyMonths,
-            'returned_from_job_id' => $originalJob->id,
+            'returned_from_job_id' => $job->id,
             'created_by_user_id' => $user->id,
             'notes' => $payload['notes'] ?? null,
             'received_at' => now(),
@@ -620,21 +690,12 @@ class JobController extends Controller
 
         DB::transaction(function () use ($job): void {
             foreach ($job->jobImages()->get() as $image) {
-                if ($image->image_path) {
-                    try {
-                        if (Storage::disk('public')->exists($image->image_path)) {
-                            Storage::disk('public')->delete($image->image_path);
-                        }
-                    } catch (\Throwable) {
-                        // Storage errors should not block job deletion
-                    }
+                if ($image->image_path && Storage::disk('public')->exists($image->image_path)) {
+                    Storage::disk('public')->delete($image->image_path);
                 }
             }
 
-            if (Schema::hasColumn('service_jobs', 'returned_from_job_id')) {
-                $job->returnedJobs()->update(['returned_from_job_id' => null]);
-            }
-
+            $job->returnedJobs()->update(['returned_from_job_id' => null]);
             $job->jobImages()->delete();
             $job->delete();
         });
@@ -688,7 +749,7 @@ class JobController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function transformJob(ServiceJob $job): array
+    private function transformJob(ServiceJob $job, bool $includeDetails = true): array
     {
         return [
             'id' => (string) $job->id,
@@ -734,32 +795,46 @@ class JobController extends Controller
             'out_at' => $job->out_at?->toIso8601String(),
             'created_at' => $job->created_at?->toIso8601String(),
             'updated_at' => $job->updated_at?->toIso8601String(),
-            'images' => $job->jobImages
-                ->map(fn (JobImage $image): array => [
-                    'id' => (string) $image->id,
-                    'path' => $image->image_path,
-                    'url' => asset('storage/'.ltrim((string) $image->image_path, '/')),
-                    'label' => $image->label,
-                    'created_at' => $image->created_at?->toIso8601String(),
-                ])
-                ->values()
-                ->all(),
-            'parts_used' => $job->stockMovements()
-                ->with('inventoryItem:id,name,sku')
-                ->where('type', 'out')
-                ->latest()
-                ->get()
-                ->map(fn (StockMovement $movement): array => [
-                    'id' => (string) $movement->id,
-                    'inventory_item_id' => (string) $movement->inventory_item_id,
-                    'part_name' => $movement->inventoryItem?->name,
-                    'part_sku' => $movement->inventoryItem?->sku,
-                    'quantity' => (int) $movement->quantity,
-                    'reason' => $movement->reason,
-                    'created_at' => $movement->created_at?->toIso8601String(),
-                ])
-                ->values()
-                ->all(),
+            'images' => $includeDetails
+                ? $job->jobImages
+                    ->map(fn (JobImage $image): array => [
+                        'id' => (string) $image->id,
+                        'path' => $image->image_path,
+                        'url' => asset('storage/'.ltrim((string) $image->image_path, '/')),
+                        'label' => $image->label,
+                        'created_at' => $image->created_at?->toIso8601String(),
+                    ])
+                    ->values()
+                    ->all()
+                : [],
+            'tracking_url' => $this->buildJobTrackingUrl($job),
+            'parts_used' => $includeDetails
+                ? $job->stockMovements()
+                    ->with('inventoryItem:id,name,sku')
+                    ->where('type', 'out')
+                    ->latest()
+                    ->get()
+                    ->map(fn (StockMovement $movement): array => [
+                        'id' => (string) $movement->id,
+                        'inventory_item_id' => (string) $movement->inventory_item_id,
+                        'part_name' => $movement->inventoryItem?->name,
+                        'part_sku' => $movement->inventoryItem?->sku,
+                        'quantity' => (int) $movement->quantity,
+                        'reason' => $movement->reason,
+                        'created_at' => $movement->created_at?->toIso8601String(),
+                    ])
+                    ->values()
+                    ->all()
+                : [],
         ];
+    }
+
+    private function buildJobTrackingUrl(ServiceJob $job): string
+    {
+        $baseUrl = rtrim((string) config('services.frontend.url', 'https://www.nozan-service.com'), '/');
+        $jobCode = rawurlencode((string) $job->job_code);
+        $token = rawurlencode($job->trackingToken());
+
+        return sprintf('%s/track/%s?token=%s', $baseUrl, $jobCode, $token);
     }
 }

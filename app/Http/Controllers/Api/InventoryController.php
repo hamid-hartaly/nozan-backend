@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\InventoryItem;
+use App\Models\InventoryItemImage;
 use App\Models\ServiceJob;
 use App\Models\StockMovement;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,6 +32,8 @@ class InventoryController extends Controller
             'location' => ['required', 'string', 'max:255'],
             'unit_cost_iqd' => ['required', 'numeric', 'min:0'],
             'photo' => ['nullable', 'image', 'max:3072'],
+            'photos' => ['nullable', 'array', 'max:8'],
+            'photos.*' => ['image', 'max:3072'],
         ]);
 
         $similarProducts = collect($payload['similar_products'] ?? [])
@@ -39,11 +43,6 @@ class InventoryController extends Controller
             ->all();
 
         $sku = $this->generateUniqueSku((string) $payload['part_number']);
-
-        $imagePath = null;
-        if ($request->hasFile('photo')) {
-            $imagePath = $request->file('photo')?->store('inventory-items', 'public');
-        }
 
         $item = InventoryItem::create([
             'name' => trim((string) $payload['name']),
@@ -59,9 +58,12 @@ class InventoryController extends Controller
             'unit_cost_iqd' => $payload['unit_cost_iqd'],
             'buy_price' => $payload['unit_cost_iqd'],
             'location' => trim((string) $payload['location']),
-            'image_path' => $imagePath,
+            'image_path' => null,
             'supplier' => null,
         ]);
+
+        $this->storeUploadedImages($request, $item);
+        $item = $item->fresh(['inventoryImages']);
 
         return response()->json([
             'message' => 'Inventory item created successfully.',
@@ -75,6 +77,7 @@ class InventoryController extends Controller
         abort_unless($user instanceof User && $user->roleEnum()->canAccessInventory(), 403);
 
         $items = InventoryItem::query()
+            ->with('inventoryImages')
             ->orderBy('category')
             ->orderBy('name')
             ->get();
@@ -95,6 +98,7 @@ class InventoryController extends Controller
     public function show(Request $request, InventoryItem $item): JsonResponse
     {
         $this->ensureInventoryAccess($request);
+        $item->loadMissing('inventoryImages');
 
         return response()->json([
             'item' => $this->transformItem($item),
@@ -195,7 +199,11 @@ class InventoryController extends Controller
             'location' => ['required', 'string', 'max:255'],
             'unit_cost_iqd' => ['required', 'numeric', 'min:0'],
             'photo' => ['nullable', 'image', 'max:3072'],
+            'photos' => ['nullable', 'array', 'max:8'],
+            'photos.*' => ['image', 'max:3072'],
             'remove_photo' => ['nullable', 'boolean'],
+            'remove_image_ids' => ['nullable', 'array'],
+            'remove_image_ids.*' => ['integer', Rule::exists('inventory_item_images', 'id')],
         ]);
 
         $similarProducts = collect($payload['similar_products'] ?? [])
@@ -204,19 +212,24 @@ class InventoryController extends Controller
             ->values()
             ->all();
 
-        $imagePath = $item->image_path;
+        $item->loadMissing('inventoryImages');
+        $this->migrateLegacyImageToRelation($item);
 
-        if ($request->boolean('remove_photo') && $imagePath) {
-            Storage::disk('public')->delete($imagePath);
-            $imagePath = null;
+        if ($request->boolean('remove_photo')) {
+            foreach ($item->inventoryImages as $image) {
+                Storage::disk('public')->delete($image->image_path);
+                $image->delete();
+            }
+            $item->setRelation('inventoryImages', collect());
         }
 
-        if ($request->hasFile('photo')) {
-            if ($imagePath) {
-                Storage::disk('public')->delete($imagePath);
+        $removeImageIds = collect($payload['remove_image_ids'] ?? [])->map(static fn ($value): int => (int) $value)->all();
+        if ($removeImageIds !== []) {
+            $imagesToRemove = $item->inventoryImages->whereIn('id', $removeImageIds);
+            foreach ($imagesToRemove as $image) {
+                Storage::disk('public')->delete($image->image_path);
+                $image->delete();
             }
-
-            $imagePath = $request->file('photo')?->store('inventory-items', 'public');
         }
 
         $item->fill([
@@ -228,7 +241,6 @@ class InventoryController extends Controller
             'location' => trim((string) $payload['location']),
             'unit_cost_iqd' => $payload['unit_cost_iqd'],
             'buy_price' => $payload['unit_cost_iqd'],
-            'image_path' => $imagePath,
         ]);
 
         if ($item->sku === null || trim((string) $item->sku) === '') {
@@ -236,10 +248,12 @@ class InventoryController extends Controller
         }
 
         $item->save();
+        $this->storeUploadedImages($request, $item);
+        $this->syncPrimaryImagePath($item->fresh(['inventoryImages']));
 
         return response()->json([
             'message' => 'Inventory item updated successfully.',
-            'item' => $this->transformItem($item->fresh()),
+            'item' => $this->transformItem($item->fresh(['inventoryImages'])),
         ]);
     }
 
@@ -250,9 +264,15 @@ class InventoryController extends Controller
         DB::transaction(function () use ($item): void {
             StockMovement::query()->where('inventory_item_id', $item->id)->delete();
 
+            foreach ($item->inventoryImages()->get() as $image) {
+                Storage::disk('public')->delete($image->image_path);
+            }
+
             if ($item->image_path) {
                 Storage::disk('public')->delete($item->image_path);
             }
+
+            $item->inventoryImages()->delete();
 
             $item->delete();
         });
@@ -292,6 +312,26 @@ class InventoryController extends Controller
     {
         /** @var FilesystemAdapter $publicDisk */
         $publicDisk = Storage::disk('public');
+        $item->loadMissing('inventoryImages');
+        $images = $item->inventoryImages
+            ->map(fn (InventoryItemImage $image): array => [
+                'id' => (string) $image->id,
+                'path' => $image->image_path,
+                'url' => $publicDisk->url($image->image_path),
+                'created_at' => $image->created_at?->toIso8601String(),
+            ])
+            ->values();
+
+        if ($images->isEmpty() && $item->image_path) {
+            $images = collect([[
+                'id' => 'legacy',
+                'path' => $item->image_path,
+                'url' => $publicDisk->url($item->image_path),
+                'created_at' => $item->updated_at?->toIso8601String(),
+            ]]);
+        }
+
+        $primaryImageUrl = $images->first()['url'] ?? null;
 
         return [
             'id' => (string) $item->id,
@@ -307,8 +347,82 @@ class InventoryController extends Controller
             'unit_cost_iqd' => $item->unit_cost_iqd,
             'supplier' => $item->supplier ?? '',
             'location' => $item->location ?? '',
-            'image_url' => $item->image_path ? $publicDisk->url($item->image_path) : null,
+            'image_url' => $primaryImageUrl,
+            'images' => $images->all(),
         ];
+    }
+
+    private function storeUploadedImages(Request $request, InventoryItem $item): void
+    {
+        $uploads = $this->gatherUploadedImages($request);
+        if ($uploads === []) {
+            $this->syncPrimaryImagePath($item->fresh(['inventoryImages']));
+            return;
+        }
+
+        $item->loadMissing('inventoryImages');
+        $sortOrder = (int) $item->inventoryImages->count();
+
+        foreach ($uploads as $upload) {
+            $path = $upload->store('inventory-items', 'public');
+            $item->inventoryImages()->create([
+                'image_path' => $path,
+                'sort_order' => $sortOrder,
+            ]);
+            $sortOrder++;
+        }
+
+        $this->syncPrimaryImagePath($item->fresh(['inventoryImages']));
+    }
+
+    /**
+     * @return array<int, UploadedFile>
+     */
+    private function gatherUploadedImages(Request $request): array
+    {
+        $uploads = [];
+
+        if ($request->hasFile('photo')) {
+            $single = $request->file('photo');
+            if ($single instanceof UploadedFile) {
+                $uploads[] = $single;
+            }
+        }
+
+        foreach ($request->file('photos', []) as $file) {
+            if ($file instanceof UploadedFile) {
+                $uploads[] = $file;
+            }
+        }
+
+        return $uploads;
+    }
+
+    private function migrateLegacyImageToRelation(InventoryItem $item): void
+    {
+        $item->loadMissing('inventoryImages');
+
+        if (! $item->image_path || $item->inventoryImages->isNotEmpty()) {
+            return;
+        }
+
+        $item->inventoryImages()->create([
+            'image_path' => $item->image_path,
+            'sort_order' => 0,
+        ]);
+
+        $item->load('inventoryImages');
+    }
+
+    private function syncPrimaryImagePath(InventoryItem $item): void
+    {
+        $item->loadMissing('inventoryImages');
+        $primaryPath = $item->inventoryImages->first()?->image_path;
+
+        if ($item->image_path !== $primaryPath) {
+            $item->image_path = $primaryPath;
+            $item->save();
+        }
     }
 
     /**
