@@ -139,6 +139,25 @@ class ServiceJob extends Model
         return 'job_code';
     }
 
+    public function resolveRouteBinding($value, $field = null): ?Model
+    {
+        if ($field !== null) {
+            return parent::resolveRouteBinding($value, $field);
+        }
+
+        if (is_numeric($value)) {
+            $jobById = $this->newQuery()->whereKey((int) $value)->first();
+
+            if ($jobById instanceof self) {
+                return $jobById;
+            }
+        }
+
+        $jobByCode = $this->newQuery()->where('job_code', (string) $value)->first();
+
+        return $jobByCode instanceof self ? $jobByCode : null;
+    }
+
     protected static function booted(): void
     {
         static::creating(function (ServiceJob $job): void {
