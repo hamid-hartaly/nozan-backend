@@ -81,6 +81,44 @@ class JobApiTest extends TestCase
         ]);
     }
 
+    public function test_staff_create_job_reuses_customer_when_phone_format_differs(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+
+        Customer::query()->create([
+            'name' => 'Original Name',
+            'phone' => '+9647509990001',
+            'address' => null,
+        ]);
+
+        Sanctum::actingAs($staff);
+
+        $response = $this->postJson('/api/jobs', [
+            'customer_name' => 'Ahmed',
+            'customer_phone' => '07509990001',
+            'tv_model' => 'LG 43"',
+            'category' => 'PANEL',
+            'priority' => 'normal',
+            'issue' => 'Line on Screen',
+        ]);
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('job.customer_name', 'Ahmed')
+            ->assertJsonPath('job.customer_phone', '07509990001');
+
+        $this->assertDatabaseHas('service_jobs', [
+            'customer_name' => 'Ahmed',
+            'customer_phone' => '07509990001',
+        ]);
+
+        $this->assertDatabaseCount('customers', 1);
+        $this->assertDatabaseHas('customers', [
+            'phone' => '+9647509990001',
+            'name' => 'Ahmed',
+        ]);
+    }
+
     public function test_staff_create_job_uses_submitted_phone_and_name_even_with_stale_customer_id(): void
     {
         $staff = User::factory()->create(['role' => 'staff']);
@@ -144,7 +182,7 @@ class JobApiTest extends TestCase
         $this->assertDatabaseCount('service_jobs', 1);
     }
 
-    public function test_staff_cannot_create_duplicate_open_job_for_same_customer(): void
+    public function test_staff_can_create_multiple_open_jobs_for_same_customer(): void
     {
         $staff = User::factory()->create(['role' => 'staff']);
         Sanctum::actingAs($staff);
@@ -171,10 +209,12 @@ class JobApiTest extends TestCase
             'issue' => 'Line on Screen',
             'estimated_price_iqd' => 20000,
         ])
-            ->assertStatus(422)
-            ->assertJsonPath('job_code', 'NGS-260430-0001');
+            ->assertCreated()
+            ->assertJsonPath('job.customer_name', 'Raman Ali')
+            ->assertJsonPath('job.customer_phone', '+964 750 555 1234')
+            ->assertJsonPath('job.status', 'PENDING');
 
-        $this->assertDatabaseCount('service_jobs', 1);
+        $this->assertDatabaseCount('service_jobs', 2);
     }
 
     public function test_staff_can_update_promised_completion_date(): void
@@ -241,6 +281,33 @@ class JobApiTest extends TestCase
         $this->postJson("/api/jobs/{$job->job_code}/status")
             ->assertOk()
             ->assertJsonPath('job.status', 'REPAIR');
+    }
+
+    public function test_staff_can_fetch_job_detail_by_job_code_and_numeric_id(): void
+    {
+        $staff = User::factory()->create(['role' => 'staff']);
+        $job = ServiceJob::query()->create([
+            'job_code' => 'NGS-260611-9999',
+            'customer_id' => 'customer-260611-9999',
+            'customer_name' => 'Dilan Omar',
+            'customer_phone' => '+964 750 123 4567',
+            'tv_model' => 'Samsung 55"',
+            'category' => 'LED',
+            'issue' => 'No picture after power on.',
+            'priority' => 'normal',
+            'status' => 'PENDING',
+            'created_by_user_id' => $staff->id,
+        ]);
+
+        Sanctum::actingAs($staff);
+
+        $this->getJson("/api/jobs/{$job->job_code}")
+            ->assertOk()
+            ->assertJsonPath('job.job_code', $job->job_code);
+
+        $this->getJson("/api/jobs/{$job->id}")
+            ->assertOk()
+            ->assertJsonPath('job.job_code', $job->job_code);
     }
 
     public function test_payment_action_is_limited_to_cashier_capable_roles(): void
