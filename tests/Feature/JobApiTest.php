@@ -266,7 +266,10 @@ class JobApiTest extends TestCase
 
         $this->getJson('/api/jobs?'.http_build_query(['search' => 'Motherboard recheck']))
             ->assertOk()
-            ->assertJsonPath('jobs.0.job_code', $job->job_code);
+            ->assertJsonPath('jobs.0.job_code', $job->job_code)
+            ->assertJsonPath('current_page', 1)
+            ->assertJsonPath('last_page', 1)
+            ->assertJsonPath('total', null);
 
         $this->getJson('/api/jobs?'.http_build_query(['search' => 'Shwan Hama']))
             ->assertOk()

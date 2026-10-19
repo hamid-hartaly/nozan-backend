@@ -202,16 +202,26 @@ class JobController extends Controller
             $query->latest();
         }
 
-        $jobs = $query->paginate($request->integer('per_page', 20));
+        $perPage = $request->integer('per_page', 20);
+        if ($search !== '') {
+            $jobs = $query->simplePaginate($perPage);
+            $lastPage = $jobs->currentPage() + ($jobs->hasMorePages() ? 1 : 0);
+            $total = null;
+        } else {
+            $jobs = $query->paginate($perPage);
+            $lastPage = $jobs->lastPage();
+            $total = $jobs->total();
+        }
+
         $transformed = $jobs->through(fn (ServiceJob $job): array => $this->transformJob($job, $includeDetails));
 
         return response()->json([
             'jobs' => $transformed->items(),
             'data' => $transformed->items(),
             'current_page' => $transformed->currentPage(),
-            'last_page' => $transformed->lastPage(),
+            'last_page' => $lastPage,
             'per_page' => $transformed->perPage(),
-            'total' => $transformed->total(),
+            'total' => $total,
         ]);
     }
 
