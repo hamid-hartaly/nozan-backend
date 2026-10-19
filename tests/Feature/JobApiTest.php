@@ -243,6 +243,47 @@ class JobApiTest extends TestCase
             ->assertJsonPath('job.status', 'REPAIR');
     }
 
+    public function test_job_search_matches_notes_assigned_staff_and_local_phone_formats(): void
+    {
+        $creator = User::factory()->create(['role' => 'staff']);
+        $technician = User::factory()->create(['role' => 'staff', 'name' => 'Shwan Hama']);
+        $job = ServiceJob::query()->create([
+            'job_code' => 'NGS-260329-0099',
+            'customer_id' => 'customer-260329-0099',
+            'customer_name' => 'Renas Omar',
+            'customer_phone' => '+964 750 123 4567',
+            'tv_model' => 'Samsung 50"',
+            'category' => 'LED',
+            'issue' => 'Display has a horizontal line.',
+            'notes' => 'Motherboard recheck after repair.',
+            'priority' => 'normal',
+            'status' => 'PENDING',
+            'assigned_staff_uid' => $technician->id,
+            'created_by_user_id' => $creator->id,
+        ]);
+
+        Sanctum::actingAs($creator);
+
+        $this->getJson('/api/jobs?'.http_build_query(['search' => 'Motherboard recheck']))
+            ->assertOk()
+            ->assertJsonPath('jobs.0.job_code', $job->job_code);
+
+        $this->getJson('/api/jobs?'.http_build_query(['search' => 'Shwan Hama']))
+            ->assertOk()
+            ->assertJsonPath('jobs.0.job_code', $job->job_code);
+
+        $this->getJson('/api/jobs?'.http_build_query(['search' => '0750 123 4567']))
+            ->assertOk()
+            ->assertJsonPath('jobs.0.job_code', $job->job_code);
+
+        $this->getJson('/api/jobs?'.http_build_query([
+            'search' => '0750 123 4567',
+            'search_scope' => 'phone',
+        ]))
+            ->assertOk()
+            ->assertJsonPath('jobs.0.job_code', $job->job_code);
+    }
+
     public function test_payment_action_is_limited_to_cashier_capable_roles(): void
     {
         $creator = User::factory()->create(['role' => 'admin']);

@@ -40,6 +40,7 @@ class JobController extends Controller
             'promised_day' => ['nullable', 'date'],
             'overdue_promises' => ['nullable', 'boolean'],
             'promise_sort' => ['nullable', Rule::in(['none', 'closest_first', 'overdue_first'])],
+            'search_scope' => ['nullable', Rule::in(['all', 'phone', 'code'])],
         ]);
 
         $promisePreset = strtolower((string) ($filters['promise'] ?? ''));
@@ -64,17 +65,97 @@ class JobController extends Controller
             }
         }
 
-        if ($search = $request->string('search')->toString()) {
-            $query->where(function ($builder) use ($search): void {
-                $builder
-                    ->where('job_code', 'like', "%{$search}%")
-                    ->orWhere('customer_name', 'like', "%{$search}%")
-                    ->orWhere('customer_phone', 'like', "%{$search}%")
-                    ->orWhere('tv_model', 'like', "%{$search}%")
-                    ->orWhere('assigned_technician', 'like', "%{$search}%")
-                    ->orWhereHas('createdBy', function ($userQuery) use ($search): void {
-                        $userQuery->where('name', 'like', "%{$search}%");
+        $search = trim($request->string('search')->toString());
+        $searchScope = strtolower((string) ($filters['search_scope'] ?? 'all'));
+
+        if ($search !== '') {
+            $searchTokens = preg_split('/\s+/u', $search, -1, PREG_SPLIT_NO_EMPTY) ?: [$search];
+            $phoneSearchLikes = $this->phoneSearchLikeTerms($search);
+            $phoneSearchLikesByToken = [];
+
+            foreach ($searchTokens as $searchToken) {
+                $phoneSearchLikesByToken[$searchToken] = $this->phoneSearchLikeTerms($searchToken);
+            }
+
+            $optionalColumns = array_fill_keys([
+                'assigned_technician',
+                'issue',
+                'technician_notes',
+                'warranty_company',
+                'returned_from_job_id',
+                'resolution',
+                'not_fixed_reason',
+                'notes',
+            ], false);
+
+            foreach ($optionalColumns as $column => $_) {
+                $optionalColumns[$column] = Schema::hasColumn('service_jobs', $column);
+            }
+
+            $query->where(function ($builder) use (
+                $search,
+                $searchScope,
+                $searchTokens,
+                $phoneSearchLikes,
+                $phoneSearchLikesByToken,
+                $optionalColumns
+            ): void {
+                if ($searchScope === 'code') {
+                    $builder->where('job_code', 'like', "%{$search}%");
+
+                    return;
+                }
+
+                if ($searchScope === 'phone') {
+                    $builder->where('customer_phone', 'like', "%{$search}%");
+                    foreach ($phoneSearchLikes as $phoneSearchLike) {
+                        $builder->orWhereRaw(
+                            "REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(customer_phone, ''), ' ', ''), '-', ''), '+', ''), '(', '') like ?",
+                            [$phoneSearchLike]
+                        );
+                    }
+
+                    return;
+                }
+
+                foreach ($searchTokens as $searchToken) {
+                    $tokenLike = "%{$searchToken}%";
+                    $tokenPhoneSearchLikes = $phoneSearchLikesByToken[$searchToken] ?? [];
+                    $builder->where(function ($tokenBuilder) use ($tokenLike, $tokenPhoneSearchLikes, $optionalColumns): void {
+                        $tokenBuilder
+                            ->where('job_code', 'like', $tokenLike)
+                            ->orWhere('customer_name', 'like', $tokenLike)
+                            ->orWhere('customer_phone', 'like', $tokenLike)
+                            ->orWhere('tv_model', 'like', $tokenLike)
+                            ->orWhere('category', 'like', $tokenLike)
+                            ->orWhere('status', 'like', $tokenLike)
+                            ->orWhere('priority', 'like', $tokenLike);
+
+                        foreach ($tokenPhoneSearchLikes as $phoneSearchLike) {
+                            $tokenBuilder->orWhereRaw(
+                                "REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(customer_phone, ''), ' ', ''), '-', ''), '+', ''), '(', '') like ?",
+                                [$phoneSearchLike]
+                            );
+                        }
+
+                        foreach (['assigned_technician', 'issue', 'technician_notes', 'warranty_company', 'resolution', 'not_fixed_reason', 'notes'] as $column) {
+                            if ($optionalColumns[$column]) {
+                                $tokenBuilder->orWhere($column, 'like', $tokenLike);
+                            }
+                        }
+
+                        $tokenBuilder
+                            ->orWhereHas('assignedStaff', fn ($staffQuery) => $staffQuery->where('name', 'like', $tokenLike))
+                            ->orWhereHas('createdBy', fn ($creatorQuery) => $creatorQuery->where('name', 'like', $tokenLike));
+
+                        if ($optionalColumns['returned_from_job_id']) {
+                            $tokenBuilder->orWhereHas(
+                                'returnedFromJob',
+                                fn ($returnedJobQuery) => $returnedJobQuery->where('job_code', 'like', $tokenLike)
+                            );
+                        }
                     });
+                }
             });
         }
 
@@ -132,6 +213,28 @@ class JobController extends Controller
             'per_page' => $transformed->perPage(),
             'total' => $transformed->total(),
         ]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function phoneSearchLikeTerms(string $search): array
+    {
+        $normalizedSearch = strtr($search, [
+            '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+            '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+            '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+            '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+        ]);
+        $digits = preg_replace('/\D+/', '', $normalizedSearch) ?? '';
+        $terms = array_values(array_unique(array_filter([
+            $digits,
+            str_starts_with($digits, '9647') ? '0'.substr($digits, 3) : '',
+            str_starts_with($digits, '07') ? '964'.substr($digits, 1) : '',
+            str_starts_with($digits, '7') ? '0'.$digits : '',
+        ])));
+
+        return array_map(static fn (string $term): string => "%{$term}%", $terms);
     }
 
     public function overdueSummary(): JsonResponse
